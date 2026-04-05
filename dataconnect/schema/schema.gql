@@ -1,0 +1,52 @@
+type User @table {
+  username: String!
+  email: String!
+  createdAt: Timestamp!
+  displayName: String
+  photoUrl: String
+  bio: String
+  contactNumber: String
+}
+
+type Category @table {
+  name: String!
+  description: String
+}
+
+type Item @table {
+  title: String!
+  description: String!
+  price: Float!
+  condition: String!
+  category: Category!
+  createdAt: Timestamp!
+  imageUrls: [String]
+  isSold: Boolean
+  location: String
+  seller: User
+}
+
+type Offer @table {
+  offerPrice: Float!
+  status: String!
+  createdAt: Timestamp!
+  buyer: User
+  item: Item
+}
+
+type Message @table {
+  content: String!
+  createdAt: Timestamp!
+  sender: User
+  receiver: User
+  item: Item
+}
+
+type Review @table {
+  rating: Int!
+  content: String!
+  createdAt: Timestamp!
+  reviewer: User
+  reviewedUser: User
+  item: Item
+}

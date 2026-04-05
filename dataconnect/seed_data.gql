@@ -1,0 +1,33 @@
+mutation CreateSeedData @transaction @auth(level: USER, insecureReason: "This operation is for seeding data and should only be run by authenticated administrators.") {
+  # Seed Categories
+  category_insertMany(data: [
+    {id: "00000000-0000-0000-0000-000000000001", name: "Electronics", description: "Gadgets and electronic devices"},
+    {id: "00000000-0000-0000-0000-000000000002", name: "Books", description: "Literature and educational books"},
+    {id: "00000000-0000-0000-0000-000000000003", name: "Clothing", description: "Apparel for men and women"}
+  ])
+  # Seed Users
+  user_insertMany(data: [
+    {id: "00000000-0000-0000-0000-000000000101", username: "john.doe", email: "john.doe@example.com", createdAt: "2023-01-01T10:00:00Z", displayName: "John Doe"},
+    {id: "00000000-0000-0000-0000-000000000102", username: "jane.smith", email: "jane.smith@example.com", createdAt: "2023-01-02T11:00:00Z", displayName: "Jane Smith"}
+  ])
+  # Seed Items
+  item_insertMany(data: [
+    {id: "00000000-0000-0000-0000-000000000201", title: "Smartphone X", description: "Like new, latest model", price: 799.99, condition: "Used - Good", categoryId: "00000000-0000-0000-0000-000000000001", createdAt: "2023-01-03T12:00:00Z", sellerId: "00000000-0000-0000-0000-000000000101", isSold: false},
+    {id: "00000000-0000-0000-0000-000000000202", title: "The Great Novel", description: "Paperback, excellent condition", price: 12.50, condition: "Used - Very Good", categoryId: "00000000-0000-0000-0000-000000000002", createdAt: "2023-01-04T13:00:00Z", sellerId: "00000000-0000-0000-0000-000000000102", isSold: false}
+  ])
+  # Seed Offers
+  offer_insertMany(data: [
+    {id: "00000000-0000-0000-0000-000000000301", offerPrice: 750.00, status: "Pending", createdAt: "2023-01-05T14:00:00Z", buyerId: "00000000-0000-0000-0000-000000000102", itemId: "00000000-0000-0000-0000-000000000201"},
+    {id: "00000000-0000-0000-0000-000000000302", offerPrice: 10.00, status: "Accepted", createdAt: "2023-01-06T15:00:00Z", buyerId: "00000000-0000-0000-0000-000000000101", itemId: "00000000-0000-0000-0000-000000000202"}
+  ])
+  # Seed Messages
+  message_insertMany(data: [
+    {id: "00000000-0000-0000-0000-000000000401", content: "Is the price negotiable?", createdAt: "2023-01-07T16:00:00Z", senderId: "00000000-0000-0000-0000-000000000102", receiverId: "00000000-0000-0000-0000-000000000101", itemId: "00000000-0000-0000-0000-000000000201"},
+    {id: "00000000-0000-0000-0000-000000000402", content: "Yes, a little.", createdAt: "2023-01-07T16:10:00Z", senderId: "00000000-0000-0000-0000-000000000101", receiverId: "00000000-0000-0000-0000-000000000102", itemId: "00000000-0000-0000-0000-000000000201"}
+  ])
+  # Seed Reviews
+  review_insertMany(data: [
+    {id: "00000000-0000-0000-0000-000000000501", rating: 5, content: "Great seller, fast shipping!", createdAt: "2023-01-08T17:00:00Z", reviewerId: "00000000-0000-0000-0000-000000000102", reviewedUserId: "00000000-0000-0000-0000-000000000101", itemId: "00000000-0000-0000-0000-000000000201"},
+    {id: "00000000-0000-0000-0000-000000000502", rating: 4, content: "Book was as described.", createdAt: "2023-01-09T18:00:00Z", reviewerId: "00000000-0000-0000-0000-000000000101", reviewedUserId: "00000000-0000-0000-0000-000000000102", itemId: "00000000-0000-0000-0000-000000000202"}
+  ])
+}
