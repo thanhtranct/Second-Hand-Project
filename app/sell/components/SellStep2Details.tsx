@@ -18,7 +18,7 @@ const categories = [
 
 const conditions = ["Like New", "Excellent", "Good", "Acceptable"];
 
-interface SellFormFields {
+export interface SellFormFields {
     title: string;
     description: string;
     price: string;

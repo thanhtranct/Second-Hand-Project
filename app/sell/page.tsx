@@ -15,7 +15,7 @@ import {
     Loader2,
 } from "lucide-react";
 import SellStep1Photos from "./components/SellStep1Photos";
-import SellStep2Details from "./components/SellStep2Details";
+import SellStep2Details, { SellFormFields } from "./components/SellStep2Details";
 import SellStep3Review from "./components/SellStep3Review";
 
 const steps = [
@@ -30,7 +30,7 @@ function SellContent() {
     const [step, setStep] = useState(0);
     const [publishing, setPublishing] = useState(false);
     const [validationError, setValidationError] = useState("");
-    const [form, setForm] = useState({
+    const [form, setForm] = useState<SellFormFields>({
         title: "",
         description: "",
         price: "",
@@ -42,7 +42,7 @@ function SellContent() {
         { id: string; file?: File; preview: string; status: string; analysis?: { trustScore: number; classification: string } }[]
     >([]);
 
-    const updateField = (field: keyof typeof form, value: string) =>
+    const updateField = (field: keyof SellFormFields, value: string) =>
         setForm((prev) => ({ ...prev, [field]: value }));
 
     const validateStep = (): string | null => {

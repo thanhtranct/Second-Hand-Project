@@ -268,9 +268,10 @@ async def create_payment_link(
 ):
     """Create a PayOS payment link for an order."""
     data = await request.json()
-    order_code = int(data.get("orderCode", 0))
-    if not order_code:
-        raise HTTPException(status_code=400, detail="orderCode is required")
+    raw_order_code = data.get("orderCode")
+    order_code = int(raw_order_code) if raw_order_code is not None else 0
+    if order_code is None or order_code <= 0:
+        raise HTTPException(status_code=400, detail="orderCode must be a positive integer")
     amount = int(data.get("amount", 2000))
     description = str(data.get("description", "Thanh toan don hang"))[:25]  # PayOS limit
     return_url = data.get("returnUrl", "http://localhost:3000/payment/success")
@@ -309,16 +310,21 @@ async def payos_webhook(request: Request):
                 from firebase_admin import firestore as fb_firestore
 
                 fs = fb_firestore.client()
-                docs = (
+                matched = list(
                     fs.collection("orders")
                     .where("orderCode", "==", order_code)
                     .stream()
                 )
-                updated = 0
-                for doc_snap in docs:
+                if len(matched) > 1:
+                    logger.warning(
+                        f"Multiple orders ({len(matched)}) matched orderCode {order_code} — "
+                        "possible hash collision; updating all matched orders"
+                    )
+                for doc_snap in matched:
                     doc_snap.reference.update({"status": "confirmed"})
-                    updated += 1
-                logger.info(f"Updated {updated} order(s) to 'confirmed' for orderCode {order_code}")
+                logger.info(
+                    f"Updated {len(matched)} order(s) to 'confirmed' for orderCode {order_code}"
+                )
             except Exception as exc:
                 logger.error(f"Failed to update order status in Firestore: {exc}")
 

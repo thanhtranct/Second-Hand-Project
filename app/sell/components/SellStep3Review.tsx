@@ -3,18 +3,11 @@
 import React from "react";
 import { ShieldCheck } from "lucide-react";
 
+import { SellFormFields } from "./SellStep2Details";
+
 interface UploadedImageItem {
     id: string;
     preview: string;
-}
-
-interface SellFormFields {
-    title: string;
-    description: string;
-    price: string;
-    category: string;
-    condition: string;
-    location: string;
 }
 
 interface SellStep3ReviewProps {
