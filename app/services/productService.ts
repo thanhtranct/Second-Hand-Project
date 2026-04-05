@@ -30,8 +30,12 @@ export async function uploadImage(file: File): Promise<string> {
     const ext = file.name.split(".").pop() || "jpg";
     const filename = `products/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
     const storageRef = ref(storage, filename);
-    const snapshot = await uploadBytes(storageRef, file);
-    return getDownloadURL(snapshot.ref);
+    try {
+        const snapshot = await uploadBytes(storageRef, file);
+        return getDownloadURL(snapshot.ref);
+    } catch (err) {
+        throw new Error(`Failed to upload image "${file.name}": ${err instanceof Error ? err.message : String(err)}`);
+    }
 }
 
 /**
@@ -87,7 +91,10 @@ function formatRelativeTime(timestamp: Timestamp | undefined): string {
  * Map Firestore document to Product.
  */
 function mapDocToProduct(d: DocumentSnapshot): Product {
-    const data = d.data()!;
+    const data = d.data();
+    if (!data) {
+        throw new Error(`Product document ${d.id} has no data`);
+    }
     return {
         id: d.id,
         title: data.title || "",

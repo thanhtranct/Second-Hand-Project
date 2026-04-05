@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getOrderById, updateOrderStatus } from "../../services/orderService";
+import { getOrderById, updateOrderWithPayment } from "../../services/orderService";
 import { useAuth } from "../../components/auth/AuthProvider";
 import { Order } from "../../data/products";
 import React from "react";
@@ -40,15 +40,21 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
         fetchOrder();
     }, [id, user]);
 
+    /** Deterministic order code derived from the Firestore order ID. */
+    const buildOrderCode = (orderId: string): number => {
+        let hash = 5381;
+        for (let i = 0; i < orderId.length; i++) {
+            hash = ((hash << 5) + hash) + orderId.charCodeAt(i);
+            hash = hash & 0x7fffffff; // keep positive 31-bit int
+        }
+        return (hash % 999_999_999) + 1; // ensure range 1–999 999 999
+    };
+
     const handlePayment = async () => {
         if (!order) return;
         setProcessingPayment(true);
         try {
-            // Update order status to pending before redirecting
-            await updateOrderStatus(order.id, "pending");
-
-            // Generate orderCode from string id for PayOS (needs to be int)
-            const orderCode = Math.floor(Math.random() * 1000000000); // Temporary random ID for prototype
+            const orderCode = buildOrderCode(order.id);
 
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
             const response = await fetch(`${apiUrl}/api/payment/create-link`, {
@@ -58,7 +64,7 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
                 },
                 body: JSON.stringify({
                     orderId: order.id,
-                    orderCode: orderCode,
+                    orderCode,
                     amount: Math.max(Math.round(order.price * 25000), 2000), // Convert USD to VND, PayOS min is 2000
                     description: "Mua hang",
                     returnUrl: `${window.location.origin}/payment/success?orderId=${order.id}`,
@@ -72,11 +78,14 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
             }
 
             const data = await response.json();
-            if (data.checkoutUrl) {
-                window.location.href = data.checkoutUrl;
-            } else {
+            if (!data.checkoutUrl) {
                 throw new Error("No checkout url returned from server");
             }
+
+            // Update order status and persist orderCode ONLY after payment link is created
+            await updateOrderWithPayment(order.id, "pending", orderCode);
+
+            window.location.href = data.checkoutUrl;
         } catch (err: any) {
             console.error(err);
             if (err.message.includes("Failed to fetch")) {
@@ -111,10 +120,10 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
                     <div className="flex flex-col gap-3">
                         <button
                             onClick={handlePayment}
-                            disabled={processingPayment || order.status === "paid" || order.status === "shipped" || order.status === "completed"}
+                            disabled={processingPayment || order.status === "paid" || order.status === "confirmed" || order.status === "shipped" || order.status === "completed"}
                             className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-gray-400"
                         >
-                            {processingPayment ? "Processing..." : order.status === "paid" ? "Already Paid" : "Pay with PayOS (Bank Transfer)"}
+                            {processingPayment ? "Processing..." : (order.status === "paid" || order.status === "confirmed") ? "Already Paid" : "Pay with PayOS (Bank Transfer)"}
                         </button>
                     </div>
                 </div>

@@ -15,6 +15,40 @@ WEIGHTS = {
     "ela": 0.20,
 }
 
+# Trust-score thresholds
+TRUST_SCORE_VERIFIED = 70     # >= this → "verified"
+TRUST_SCORE_SUSPICIOUS = 40   # >= this (and < VERIFIED) → "suspicious"
+                               # < SUSPICIOUS → "flagged"
+
+# Classification score caps
+TRUST_CAP_AI_GENERATED = 25
+TRUST_CAP_WEB_SOURCED = 35
+TRUST_CAP_EDITED = 50
+TRUST_CAP_NO_EXIF = 30
+TRUST_CAP_NO_CAMERA = 40
+
+# Minimum trust score awarded when EXIF + ELA both pass (original boost)
+TRUST_FLOOR_ORIGINAL = 90
+
+# AI detection confidence thresholds
+AI_CONFIDENCE_HIGH = 70   # >= this → definite AI image
+AI_CONFIDENCE_MID = 50    # >= this (and < HIGH) → possible AI image
+AI_CLASSIFICATION_THRESHOLD = 60  # used for classification priority
+
+# ELA editing confidence thresholds
+ELA_CONFIDENCE_HIGH = 60
+ELA_CONFIDENCE_MID = 30
+ELA_CLASSIFICATION_THRESHOLD = 50  # used for classification priority
+
+# Reverse-search match count thresholds
+REVERSE_MATCH_MANY = 5   # >= this → strong web-sourced signal
+REVERSE_MATCH_FEW = 2    # >= this (and < MANY) → weak web-sourced signal
+REVERSE_MATCH_CLASSIFICATION = 3  # >= this → classify as web-sourced
+
+# Scores assigned when a service is unavailable
+SCORE_SERVICE_UNAVAILABLE = 60  # neutral — no evidence either way
+SCORE_NO_MATCHES = 90           # reward: image not found online
+
 # Human-readable classification labels (Vietnamese + English)
 CLASSIFICATION_INFO = {
     "original": {
@@ -95,17 +129,17 @@ def _summarize_reverse_search(reverse_result: dict[str, Any]) -> dict[str, Any]:
         if any("skipped" in d.lower() or "not configured" in d.lower() for d in details):
             # Service unavailable — treat as neutral, don't penalize
             verdict = "neutral"
-            score = 60  # neutral: service not available, no evidence either way
+            score = SCORE_SERVICE_UNAVAILABLE
             summary = "Reverse search not available — image origin not checked. This does not affect authenticity."
         else:
             verdict = "pass"
-            score = 90  # reward: image not found online = likely original
+            score = SCORE_NO_MATCHES
             summary = "✓ No matches found online — this is a unique photo, likely taken directly by the seller."
-    elif match_count >= 5:
+    elif match_count >= REVERSE_MATCH_MANY:
         verdict = "fail"
         top_source = sources[0].get("source", "unknown") if sources else "unknown"
         summary = f"Found {match_count} matches online (e.g. {top_source}). Likely not an original photo."
-    elif match_count >= 2:
+    elif match_count >= REVERSE_MATCH_FEW:
         verdict = "warn"
         summary = f"Found {match_count} similar images online. May not be original."
     else:
@@ -128,10 +162,10 @@ def _summarize_ai_detection(ai_result: dict[str, Any]) -> dict[str, Any]:
     label = ai_result.get("label", "unknown")
     score = ai_result.get("score", 50)
 
-    if is_ai and confidence > 70:
+    if is_ai and confidence > AI_CONFIDENCE_HIGH:
         verdict = "fail"
         summary = f"Classified as AI-generated with {confidence}% confidence. This is likely not a real photograph."
-    elif is_ai and confidence > 50:
+    elif is_ai and confidence > AI_CONFIDENCE_MID:
         verdict = "warn"
         summary = f"Possible AI-generated image ({confidence}% confidence). Requires further inspection."
     elif not is_ai and label == "Real":
@@ -140,7 +174,7 @@ def _summarize_ai_detection(ai_result: dict[str, Any]) -> dict[str, Any]:
     elif label == "unknown" and confidence == 0:
         # Model didn't load or returned no result — don't penalize
         verdict = "neutral"
-        score = 60  # neutral: inconclusive, not negative
+        score = SCORE_SERVICE_UNAVAILABLE
         summary = "AI detection inconclusive — model did not return a result. This does not affect authenticity."
     else:
         verdict = "neutral"
@@ -162,10 +196,10 @@ def _summarize_ela(ela_result: dict[str, Any]) -> dict[str, Any]:
     suspicious_area = ela_result.get("suspicious_area_pct", 0)
     score = ela_result.get("score", 50)
 
-    if edited and confidence > 60:
+    if edited and confidence > ELA_CONFIDENCE_HIGH:
         verdict = "fail"
         summary = f"Editing detected — {suspicious_area}% of the image has inconsistent compression levels ({confidence}% confidence)."
-    elif edited and confidence > 30:
+    elif edited and confidence > ELA_CONFIDENCE_MID:
         verdict = "warn"
         summary = f"Minor editing indicators — {suspicious_area}% suspicious area ({confidence}% confidence)."
     else:
@@ -235,28 +269,28 @@ def make_decision(
     classification_reason = "All checks passed — image appears authentic."
 
     # Priority 1: AI-generated
-    if ai_result.get("is_ai") and ai_result.get("confidence", 0) > 60:
+    if ai_result.get("is_ai") and ai_result.get("confidence", 0) > AI_CLASSIFICATION_THRESHOLD:
         classification = "ai-generated"
-        trust_score = min(trust_score, 25)
+        trust_score = min(trust_score, TRUST_CAP_AI_GENERATED)
         classification_reason = f"AI detector classified this as AI-generated with {ai_result.get('confidence', 0)}% confidence."
 
     # Priority 2: Web-sourced (via reverse search)
-    elif reverse_result.get("found") and reverse_result.get("match_count", 0) >= 3:
+    elif reverse_result.get("found") and reverse_result.get("match_count", 0) >= REVERSE_MATCH_CLASSIFICATION:
         classification = "web-sourced"
-        trust_score = min(trust_score, 35)
+        trust_score = min(trust_score, TRUST_CAP_WEB_SOURCED)
         match_count = reverse_result.get("match_count", 0)
         classification_reason = f"Found {match_count} identical/similar images online. This is likely downloaded from the internet."
 
     # Priority 3: Edited
-    elif ela_result.get("edited") and ela_result.get("confidence", 0) > 50:
+    elif ela_result.get("edited") and ela_result.get("confidence", 0) > ELA_CLASSIFICATION_THRESHOLD:
         classification = "edited"
-        trust_score = min(trust_score, 50)
+        trust_score = min(trust_score, TRUST_CAP_EDITED)
         classification_reason = f"Error Level Analysis detected editing with {ela_result.get('confidence', 0)}% confidence."
 
     # Priority 4: Web-sourced (via missing EXIF — no camera/phone produces images without EXIF)
     elif not metadata_result.get("has_exif", False):
         classification = "web-sourced"
-        trust_score = min(trust_score, 30)
+        trust_score = min(trust_score, TRUST_CAP_NO_EXIF)
         classification_reason = (
             "No EXIF metadata found. Original photos from cameras and phones always "
             "contain EXIF data (camera model, date, etc). This image was likely "
@@ -266,7 +300,7 @@ def make_decision(
     # Priority 5: Web-sourced (has EXIF but no camera info — likely screenshot or web)
     elif metadata_result.get("has_exif") and not metadata_result.get("camera"):
         classification = "web-sourced"
-        trust_score = min(trust_score, 40)
+        trust_score = min(trust_score, TRUST_CAP_NO_CAMERA)
         classification_reason = (
             "EXIF metadata present but no camera information found. "
             "This image may be a screenshot or downloaded from the web."
@@ -275,12 +309,12 @@ def make_decision(
     # Apply boost ONLY if classification is still "original"
     if classification == "original" and meta_verdict == "pass" and ela_verdict == "pass":
         # Camera EXIF confirmed + no editing = very strong evidence of original
-        trust_score = max(trust_score, 90)
+        trust_score = max(trust_score, TRUST_FLOOR_ORIGINAL)
 
     # Determine trust level
-    if trust_score >= 70:
+    if trust_score >= TRUST_SCORE_VERIFIED:
         trust_level = "verified"
-    elif trust_score >= 40:
+    elif trust_score >= TRUST_SCORE_SUSPICIOUS:
         trust_level = "suspicious"
     else:
         trust_level = "flagged"

@@ -19,7 +19,10 @@ import { Order } from "../data/products";
 const ORDERS_COLLECTION = "orders";
 
 function mapDocToOrder(d: DocumentSnapshot): Order {
-    const data = d.data()!;
+    const data = d.data();
+    if (!data) {
+        throw new Error(`Order document ${d.id} has no data`);
+    }
     return {
         id: d.id,
         productId: data.productId || "",
@@ -30,6 +33,7 @@ function mapDocToOrder(d: DocumentSnapshot): Order {
         sellerId: data.sellerId || "",
         status: data.status || "pending",
         paymentMethod: data.paymentMethod || "cod",
+        orderCode: data.orderCode ?? undefined,
         createdAt: data.createdAt?.toMillis?.() || Date.now(),
     };
 }
@@ -72,6 +76,21 @@ export async function getOrdersBySeller(sellerId: string): Promise<Order[]> {
 export async function updateOrderStatus(id: string, status: Order["status"]): Promise<void> {
     await updateDoc(doc(db, ORDERS_COLLECTION, id), {
         status,
+        updatedAt: serverTimestamp(),
+    });
+}
+
+/**
+ * Update order status and store the PayOS orderCode for webhook lookups.
+ */
+export async function updateOrderWithPayment(
+    id: string,
+    status: Order["status"],
+    orderCode: number,
+): Promise<void> {
+    await updateDoc(doc(db, ORDERS_COLLECTION, id), {
+        status,
+        orderCode,
         updatedAt: serverTimestamp(),
     });
 }
