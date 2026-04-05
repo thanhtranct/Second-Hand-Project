@@ -19,7 +19,10 @@ import { AppNotification } from "../data/products";
 const NOTIFICATIONS_COLLECTION = "notifications";
 
 function mapDocToNotification(d: DocumentSnapshot): AppNotification {
-    const data = d.data()!;
+    const data = d.data();
+    if (!data) {
+        throw new Error(`Notification document ${d.id} has no data`);
+    }
     return {
         id: d.id,
         userId: data.userId || "",
@@ -71,5 +74,9 @@ export async function markAllAsRead(userId: string): Promise<void> {
     snapshot.docs.forEach((d) => {
         batch.update(d.ref, { read: true });
     });
-    await batch.commit();
+    try {
+        await batch.commit();
+    } catch (err) {
+        throw new Error(`Failed to mark notifications as read: ${err instanceof Error ? err.message : String(err)}`);
+    }
 }

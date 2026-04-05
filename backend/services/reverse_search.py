@@ -11,6 +11,18 @@ from typing import Any
 
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 SERPAPI_URL = "https://serpapi.com/search.json"
+SERPAPI_TIMEOUT_SECONDS = 30
+
+# Score values
+SCORE_MANY_MATCHES = 15   # 5+ matches found — very likely not original
+SCORE_FEW_MATCHES = 35    # 2-4 matches found — possibly not original
+SCORE_ONE_MATCH = 55      # 1 match — may be coincidental
+SCORE_NO_MATCHES = 85     # no matches — likely original
+SCORE_SERVICE_ERROR = 50  # service unavailable — uncertain
+
+# Match-count thresholds
+MATCH_THRESHOLD_MANY = 5
+MATCH_THRESHOLD_FEW = 2
 
 
 def reverse_search(image_bytes: bytes) -> dict[str, Any]:
@@ -30,7 +42,7 @@ def reverse_search(image_bytes: bytes) -> dict[str, Any]:
         result["details"].append(
             "SerpAPI key not configured — reverse search skipped"
         )
-        result["score"] = 50  # uncertain
+        result["score"] = SCORE_SERVICE_ERROR
         return result
 
     try:
@@ -50,7 +62,7 @@ def reverse_search(image_bytes: bytes) -> dict[str, Any]:
                 SERPAPI_URL,
                 params=params,
                 files={"image": f},
-                timeout=30,
+                timeout=SERPAPI_TIMEOUT_SECONDS,
             )
 
         # Clean up
@@ -58,7 +70,7 @@ def reverse_search(image_bytes: bytes) -> dict[str, Any]:
 
         if response.status_code != 200:
             result["details"].append(f"SerpAPI returned status {response.status_code}")
-            result["score"] = 50
+            result["score"] = SCORE_SERVICE_ERROR
             return result
 
         data = response.json()
@@ -79,28 +91,28 @@ def reverse_search(image_bytes: bytes) -> dict[str, Any]:
             ]
 
             # More matches = more likely it's not an original photo
-            if result["match_count"] >= 5:
-                result["score"] = 15
+            if result["match_count"] >= MATCH_THRESHOLD_MANY:
+                result["score"] = SCORE_MANY_MATCHES
                 result["details"].append(
                     f"Found {result['match_count']} matches online — likely not an original photo"
                 )
-            elif result["match_count"] >= 2:
-                result["score"] = 35
+            elif result["match_count"] >= MATCH_THRESHOLD_FEW:
+                result["score"] = SCORE_FEW_MATCHES
                 result["details"].append(
                     f"Found {result['match_count']} similar images online"
                 )
             else:
-                result["score"] = 55
+                result["score"] = SCORE_ONE_MATCH
                 result["details"].append("Found 1 similar image online — may be coincidental")
         else:
-            result["score"] = 85
+            result["score"] = SCORE_NO_MATCHES
             result["details"].append("No matches found online — likely an original photo")
 
     except requests.Timeout:
         result["details"].append("Reverse search timed out")
-        result["score"] = 50
+        result["score"] = SCORE_SERVICE_ERROR
     except Exception as e:
         result["details"].append(f"Reverse search error: {str(e)}")
-        result["score"] = 50
+        result["score"] = SCORE_SERVICE_ERROR
 
     return result

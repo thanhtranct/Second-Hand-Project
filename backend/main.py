@@ -10,14 +10,26 @@ Features:
 - Unified trust score decision engine
 """
 
-import io
+import json
 import logging
+import os
+
+import magic
 from dotenv import load_dotenv
-load_dotenv()  # Load .env file for HF_TOKEN, SERPAPI_KEY, etc.
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+
+load_dotenv()  # Load .env file for HF_TOKEN, SERPAPI_KEY, PAYOS_*, etc.
+
+import firebase_admin
+from firebase_admin import auth as fb_auth
+from firebase_admin import credentials as fb_credentials
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from payos import PayOS, ItemData, PaymentData
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from payos import ItemData, PayOS, PaymentData
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from services.metadata_analyzer import analyze_metadata
 from services.reverse_search import reverse_search
@@ -28,55 +40,143 @@ from services.decision_engine import make_decision
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("resell-ai")
 
-# Init PayOS
-import os
+# ---------------------------------------------------------------------------
+# PayOS — credentials from environment variables (never hardcode secrets)
+# ---------------------------------------------------------------------------
 payos = PayOS(
-    client_id="4f902b55-1513-4080-ac3f-bc40ff2433f5",
-    api_key="3b6ab720-74fa-4d7f-9176-7a541e1f87ac",
-    checksum_key="e351d30a0887cd9466fdcde0b545ab7ebc3bbad2a03869aac05dc04836ee7fa8"
+    client_id=os.environ.get("PAYOS_CLIENT_ID", ""),
+    api_key=os.environ.get("PAYOS_API_KEY", ""),
+    checksum_key=os.environ.get("PAYOS_CHECKSUM_KEY", ""),
 )
 
+# ---------------------------------------------------------------------------
+# Firebase Admin — optional; enables token verification & Firestore updates
+# ---------------------------------------------------------------------------
+_firebase_initialized = False
+
+
+def _init_firebase() -> None:
+    global _firebase_initialized
+    if _firebase_initialized:
+        return
+    service_account_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    if not service_account_json:
+        logger.warning(
+            "⚠️  FIREBASE_SERVICE_ACCOUNT_JSON not set — "
+            "Firebase token verification and webhook order updates disabled"
+        )
+        return
+    try:
+        cred = fb_credentials.Certificate(json.loads(service_account_json))
+        firebase_admin.initialize_app(cred)
+        _firebase_initialized = True
+        logger.info("✅ Firebase Admin SDK initialized")
+    except Exception as exc:
+        logger.warning(f"⚠️  Firebase Admin SDK init failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter
+# ---------------------------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address)
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
 app = FastAPI(
     title="ReSell AI Image Verification",
     description="Analyzes uploaded product images for authenticity using AI.",
     version="1.0.0",
 )
 
-# CORS — allow Next.js frontend
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — restrict to known origins
+_allowed_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "ALLOWED_ORIGINS", "http://localhost:3000"
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
-# Maximum file size: 10MB
+# Maximum file size: 10 MB
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
+# Allowed image MIME types (verified via magic bytes, not just Content-Type)
+ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
+# ---------------------------------------------------------------------------
+# Security: Firebase token verification dependency
+# ---------------------------------------------------------------------------
+_http_bearer = HTTPBearer(auto_error=False)
+
+
+async def verify_firebase_token(
+    credentials: HTTPAuthorizationCredentials = Depends(_http_bearer),
+):
+    """
+    Validate a Firebase ID token passed as a Bearer token.
+    Returns the decoded token payload.
+    Raises 401 if Firebase Admin is configured but the token is invalid.
+    If Firebase Admin is not configured, this dependency is a no-op.
+    """
+    if not _firebase_initialized:
+        # Firebase Admin not configured — skip verification
+        return None
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header with Bearer token is required",
+        )
+    try:
+        decoded = fb_auth.verify_id_token(credentials.credentials)
+        return decoded
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired Firebase token")
+
+
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     """Log service configuration status at startup."""
-    import os
     logger.info("🚀 Starting ReSell AI Image Verification Service...")
-    
+    _init_firebase()
+
     hf_token = os.environ.get("HF_TOKEN", "")
     serpapi_key = os.environ.get("SERPAPI_KEY", "")
-    
+
     if hf_token:
         logger.info("✅ HF_TOKEN configured — AI detection via HuggingFace API enabled")
     else:
-        logger.warning("⚠️ HF_TOKEN not set — AI detection will try local model fallback")
-    
+        logger.warning("⚠️  HF_TOKEN not set — AI detection will try local model fallback")
+
     if serpapi_key:
         logger.info("✅ SERPAPI_KEY configured — Reverse image search enabled")
     else:
-        logger.warning("⚠️ SERPAPI_KEY not set — Reverse image search disabled")
-    
+        logger.warning("⚠️  SERPAPI_KEY not set — Reverse image search disabled")
+
+    if os.environ.get("PAYOS_CLIENT_ID"):
+        logger.info("✅ PayOS credentials configured")
+    else:
+        logger.warning("⚠️  PAYOS_CLIENT_ID not set — payment features will not work")
+
     logger.info("🟢 Service ready!")
 
 
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 @app.get("/")
 async def root():
     """Health check endpoint."""
@@ -86,40 +186,49 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "analyze": "POST /api/analyze-image",
+            "payment": "POST /api/payment/create-link",
         },
     }
 
 
 @app.post("/api/analyze-image")
-async def analyze_image(image: UploadFile = File(...)):
+@limiter.limit("5/minute")
+async def analyze_image(
+    request: Request,
+    image: UploadFile = File(...),
+    _user=Depends(verify_firebase_token),
+):
     """
     Analyze an uploaded image for authenticity.
-    
+
     Runs 4 analysis pipelines:
     1. EXIF Metadata Analysis
     2. Reverse Image Search (SerpAPI)
     3. AI-Generated Detection (HuggingFace)
     4. Error Level Analysis (ELA)
-    
+
     Returns a unified trust score and classification.
     """
-    # Validate file type
-    if not image.content_type or not image.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
-
-    # Read image bytes
+    # Read image bytes first (needed for magic-byte check)
     image_bytes = await image.read()
-
-    if len(image_bytes) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="Image must be under 10MB")
 
     if len(image_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
 
+    if len(image_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Image must be under 10MB")
+
+    # Validate file type using magic bytes (not just Content-Type header)
+    detected_mime = magic.from_buffer(image_bytes[:2048], mime=True)
+    if detected_mime not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{detected_mime}'. Allowed: jpeg, png, webp",
+        )
+
     try:
         logger.info(f"📸 Analyzing image: {image.filename} ({len(image_bytes)} bytes)")
 
-        # Run all analyses
         logger.info("  → EXIF metadata analysis...")
         metadata_result = analyze_metadata(image_bytes)
 
@@ -132,7 +241,6 @@ async def analyze_image(image: UploadFile = File(...)):
         logger.info("  → ELA analysis...")
         ela_result = perform_ela(image_bytes)
 
-        # Combine into final decision
         logger.info("  → Computing final decision...")
         decision = make_decision(
             metadata_result,
@@ -152,45 +260,78 @@ async def analyze_image(image: UploadFile = File(...)):
         )
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-
 @app.post("/api/payment/create-link")
-async def create_payment_link(request: Request):
+@limiter.limit("10/minute")
+async def create_payment_link(
+    request: Request,
+    _user=Depends(verify_firebase_token),
+):
     """Create a PayOS payment link for an order."""
     data = await request.json()
-    orderCode = int(data.get("orderCode", int(str(hash(data.get("orderId", "123")))[1:9])))
+    order_code = int(data.get("orderCode", 0))
+    if not order_code:
+        raise HTTPException(status_code=400, detail="orderCode is required")
     amount = int(data.get("amount", 2000))
-    description = data.get("description", "Thanh toan don hang")
-    returnUrl = data.get("returnUrl", "http://localhost:3000/payment/success")
-    cancelUrl = data.get("cancelUrl", "http://localhost:3000/payment/cancel")
-    
+    description = str(data.get("description", "Thanh toan don hang"))[:25]  # PayOS limit
+    return_url = data.get("returnUrl", "http://localhost:3000/payment/success")
+    cancel_url = data.get("cancelUrl", "http://localhost:3000/payment/cancel")
+
     item = ItemData(name=description, quantity=1, price=amount)
-    paymentData = PaymentData(
-        orderCode=orderCode,
+    payment_data = PaymentData(
+        orderCode=order_code,
         amount=amount,
         description=description,
         items=[item],
-        returnUrl=returnUrl,
-        cancelUrl=cancelUrl
+        returnUrl=return_url,
+        cancelUrl=cancel_url,
     )
-    
+
     try:
-        link = payos.createPaymentLink(paymentData)
+        link = payos.createPaymentLink(payment_data)
         return {"checkoutUrl": link.checkoutUrl}
     except Exception as e:
         logger.error(f"PayOS error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/payment/webhook")
 async def payos_webhook(request: Request):
+    """Receive PayOS payment webhook and update the corresponding order in Firestore."""
     data = await request.json()
     try:
-        # Validate webhook using checksum key
         payos.verifyPaymentWebhookData(data)
-        logger.info(f"Payment success for orderCode {data['data']['orderCode']}")
+        order_code = data.get("data", {}).get("orderCode")
+        logger.info(f"✅ Payment verified for orderCode {order_code}")
+
+        # Update order status in Firestore if Firebase Admin is configured
+        if _firebase_initialized and order_code is not None:
+            try:
+                from firebase_admin import firestore as fb_firestore
+
+                fs = fb_firestore.client()
+                docs = (
+                    fs.collection("orders")
+                    .where("orderCode", "==", order_code)
+                    .stream()
+                )
+                updated = 0
+                for doc_snap in docs:
+                    doc_snap.reference.update({"status": "confirmed"})
+                    updated += 1
+                logger.info(f"Updated {updated} order(s) to 'confirmed' for orderCode {order_code}")
+            except Exception as exc:
+                logger.error(f"Failed to update order status in Firestore: {exc}")
+
         return JSONResponse(content={"error": 0, "message": "Ok", "data": None})
     except Exception as e:
-        logger.error(f"Webhook failed to verify: {str(e)}")
-        return JSONResponse(content={"error": -1, "message": "Failed", "data": None})
+        logger.error(f"Webhook verification failed: {str(e)}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": -1, "message": "Failed", "data": None},
+        )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
