@@ -22,16 +22,28 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
 
+    if (!name.trim()) {
+      setError("Please enter your display name");
+      return;
+    }
     if (password !== confirmPassword) {
       setError("Passwords do not match");
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
       return;
     }
-    if (!name.trim()) {
-      setError("Please enter your display name");
+    if (!/[A-Z]/.test(password)) {
+      setError("Password must contain at least one uppercase letter");
+      return;
+    }
+    if (!/[a-z]/.test(password)) {
+      setError("Password must contain at least one lowercase letter");
+      return;
+    }
+    if (!/[0-9]/.test(password)) {
+      setError("Password must contain at least one number");
       return;
     }
 
@@ -201,7 +213,7 @@ export default function SignupPage() {
           <Input
             label="Password"
             type="password"
-            placeholder="Min 6 characters"
+            placeholder="Min 8 chars, uppercase, lowercase, number"
             icon={<Lock size={16} />}
             value={password}
             onChange={(e) => setPassword(e.target.value)}

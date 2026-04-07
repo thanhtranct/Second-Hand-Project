@@ -20,7 +20,10 @@ import { Order } from "../data/products";
 const ORDERS_COLLECTION = "orders";
 
 function mapDocToOrder(d: DocumentSnapshot): Order {
-    const data = d.data()!;
+    const data = d.data();
+    if (!data) {
+        throw new Error(`Order document ${d.id} has no data`);
+    }
     return {
         id: d.id,
         productId: data.productId || "",
@@ -31,6 +34,7 @@ function mapDocToOrder(d: DocumentSnapshot): Order {
         sellerId: data.sellerId || "",
         status: data.status || "pending",
         paymentMethod: data.paymentMethod || "cod",
+        orderCode: data.orderCode ?? undefined,
         createdAt: data.createdAt?.toMillis?.() || Date.now(),
     };
 }
@@ -74,45 +78,5 @@ export async function updateOrderStatus(id: string, status: Order["status"]): Pr
     await updateDoc(doc(db, ORDERS_COLLECTION, id), {
         status,
         updatedAt: serverTimestamp(),
-    });
-}
-
-export async function completePayment(orderId: string, userId: string): Promise<void> {
-    await runTransaction(db, async (tx) => {
-        // ── ALL READS FIRST (Firestore requirement) ──────────────────────
-        const orderRef = doc(db, ORDERS_COLLECTION, orderId);
-        const orderSnap = await tx.get(orderRef);
-
-        if (!orderSnap.exists()) {
-            throw new Error("Order not found");
-        }
-
-        const order = mapDocToOrder(orderSnap);
-        if (order.buyerId !== userId) {
-            throw new Error("You are not authorized to complete this payment");
-        }
-
-        if (order.status === "paid" || order.status === "shipped" || order.status === "completed") {
-            return;
-        }
-
-        const productRef = doc(db, "products", order.productId);
-        const productSnap = await tx.get(productRef);
-
-        // ── ALL WRITES AFTER (Firestore requirement) ──────────────────────
-        tx.update(orderRef, {
-            status: "paid",
-            updatedAt: serverTimestamp(),
-            paidAt: serverTimestamp(),
-        });
-
-        if (productSnap.exists()) {
-            tx.update(productRef, {
-                status: "sold",
-                soldOrderId: orderId,
-                soldAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-            });
-        }
     });
 }

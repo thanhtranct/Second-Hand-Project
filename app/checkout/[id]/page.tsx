@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { getOrderById } from "../../services/orderService";
+import { useRouter } from "next/navigation";
+import { getOrderById, updateOrderStatus } from "../../services/orderService";
 import { useAuth } from "../../components/auth/AuthProvider";
 import { Order } from "../../data/products";
 
@@ -39,21 +39,35 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
         fetchOrder();
     }, [id, user]);
 
+    /** Deterministic order code derived from the Firestore order ID. */
+    const buildOrderCode = (orderId: string): number => {
+        let hash = 5381;
+        for (let i = 0; i < orderId.length; i++) {
+            hash = ((hash << 5) + hash) + orderId.charCodeAt(i);
+            hash = hash & 0x7fffffff; // keep positive 31-bit int
+        }
+        return (hash % 999_999_999) + 1; // ensure range 1–999 999 999
+    };
+
     const handlePayment = async () => {
         if (!order) return;
         setProcessingPayment(true);
         try {
-            // Use timestamp tail to reduce collisions while keeping numeric format for PayOS.
-            const orderCode = Number(String(Date.now()).slice(-9));
+            // Update order status to pending before redirecting
+            await updateOrderStatus(order.id, "pending");
 
-            const response = await fetch("/api/payment/create-link", {
+            // Generate orderCode from string id for PayOS (needs to be int)
+            const orderCode = Math.floor(Math.random() * 1000000000); // Temporary random ID for prototype
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const response = await fetch(`${apiUrl}/api/payment/create-link`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
                     orderId: order.id,
-                    orderCode: orderCode,
+                    orderCode,
                     amount: Math.max(Math.round(order.price * 25000), 2000), // Convert USD to VND, PayOS min is 2000
                     description: "Mua hang",
                     returnUrl: `${window.location.origin}/payment/success?orderId=${order.id}`,
@@ -67,12 +81,10 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
             }
 
             const data = await response.json();
-            if (data.checkoutUrl) {
-                window.location.href = data.checkoutUrl;
-            } else {
+            if (!data.checkoutUrl) {
                 throw new Error("No checkout url returned from server");
             }
-        } catch (err: unknown) {
+        } catch (err: any) {
             console.error(err);
             const errorMessage = err instanceof Error ? err.message : "Unknown payment error";
 
@@ -175,17 +187,10 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
                         </h3>
                         <button
                             onClick={handlePayment}
-                            disabled={processingPayment || isPaid}
-                            className="w-full py-3 rounded-xl font-semibold transition"
-                            style={{
-                                background: "var(--gradient-primary)",
-                                color: "#fff",
-                                boxShadow: "var(--shadow-glow)",
-                                opacity: processingPayment || isPaid ? 0.65 : 1,
-                                cursor: processingPayment || isPaid ? "not-allowed" : "pointer",
-                            }}
+                            disabled={processingPayment || order.status === "paid" || order.status === "shipped" || order.status === "completed"}
+                            className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-gray-400"
                         >
-                            {processingPayment ? "Processing..." : isPaid ? "Already Paid" : "Pay with PayOS (Bank Transfer)"}
+                            {processingPayment ? "Processing..." : order.status === "paid" ? "Already Paid" : "Pay with PayOS (Bank Transfer)"}
                         </button>
 
                         <p style={{ color: "var(--color-text-muted)", fontSize: "0.8rem", marginTop: "0.65rem", textAlign: "center" }}>

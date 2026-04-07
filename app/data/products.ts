@@ -61,8 +61,9 @@ export interface Order {
     price: number;
     buyerId: string;
     sellerId: string;
-    status: "pending" | "paid" | "shipped" | "completed" | "cancelled";
+    status: "pending" | "paid" | "confirmed" | "shipped" | "completed" | "cancelled";
     paymentMethod: "momo" | "zalopay" | "cod" | "payos";
+    orderCode?: number;  // PayOS integer order code — set when payment link is created
     createdAt: number;
 }
 
