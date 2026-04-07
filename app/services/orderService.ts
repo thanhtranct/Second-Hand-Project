@@ -80,3 +80,43 @@ export async function updateOrderStatus(id: string, status: Order["status"]): Pr
         updatedAt: serverTimestamp(),
     });
 }
+
+export async function completePayment(orderId: string, userId: string): Promise<void> {
+    await runTransaction(db, async (tx) => {
+        // ── ALL READS FIRST (Firestore requirement) ────────────────────
+        const orderRef = doc(db, ORDERS_COLLECTION, orderId);
+        const orderSnap = await tx.get(orderRef);
+
+        if (!orderSnap.exists()) {
+            throw new Error("Order not found");
+        }
+
+        const order = mapDocToOrder(orderSnap);
+        if (order.buyerId !== userId) {
+            throw new Error("You are not authorized to complete this payment");
+        }
+
+        if (order.status === "paid" || order.status === "shipped" || order.status === "completed") {
+            return;
+        }
+
+        const productRef = doc(db, "products", order.productId);
+        const productSnap = await tx.get(productRef);
+
+        // ── ALL WRITES AFTER (Firestore requirement) ─────────────────────
+        tx.update(orderRef, {
+            status: "paid",
+            updatedAt: serverTimestamp(),
+            paidAt: serverTimestamp(),
+        });
+
+        if (productSnap.exists()) {
+            tx.update(productRef, {
+                status: "sold",
+                soldOrderId: orderId,
+                soldAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+        }
+    });
+}

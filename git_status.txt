@@ -1,0 +1,17 @@
+M  app/auth/signup/page.tsx
+M  app/checkout/[id]/page.tsx
+M  app/data/products.ts
+A  app/sell/components/SellStep1Photos.tsx
+A  app/sell/components/SellStep2Details.tsx
+A  app/sell/components/SellStep3Review.tsx
+M  app/sell/page.tsx
+A  app/services/firestoreHelper.ts
+M  app/services/notificationService.ts
+M  app/services/orderService.ts
+M  app/services/productService.ts
+M  backend/main.py
+M  backend/requirements.txt
+M  backend/services/decision_engine.py
+M  backend/services/reverse_search.py
+M  firestore.indexes.json
+?? git_status.txt

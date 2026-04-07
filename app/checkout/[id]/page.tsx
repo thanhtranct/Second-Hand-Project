@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { getOrderById, updateOrderStatus } from "../../services/orderService";
 import { useAuth } from "../../components/auth/AuthProvider";
 import { Order } from "../../data/products";
