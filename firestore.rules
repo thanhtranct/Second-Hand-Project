@@ -8,13 +8,13 @@ service cloud.firestore {
       allow read: if true;
       allow create: if request.auth != null;
       allow update, delete: if request.auth != null && 
-        (request.auth.uid == resource.data.sellerId || isAdmin());
+        (request.auth.uid == resource.data.sellerId || isAdmin() || canBuyerMarkSold(productId));
     }
 
     // Users profile data
     match /users/{userId} {
       allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && (request.auth.uid == userId || isAdmin());
     }
 
     // Wishlists — private to each user
@@ -41,7 +41,7 @@ service cloud.firestore {
         (request.auth.uid == resource.data.buyerId || request.auth.uid == resource.data.sellerId || isAdmin());
       allow create: if request.auth != null;
       allow update: if request.auth != null && 
-        (request.auth.uid == resource.data.sellerId || isAdmin());
+        (request.auth.uid == resource.data.sellerId || isAdmin() || canBuyerMarkOrderPaid());
     }
 
     // Seller Applications
@@ -70,6 +70,31 @@ service cloud.firestore {
       return request.auth != null && 
         (request.auth.token.admin == true || 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin");
+    }
+
+    function canBuyerMarkOrderPaid() {
+      return request.auth != null &&
+        request.auth.uid == resource.data.buyerId &&
+        resource.data.status == "pending" &&
+        request.resource.data.status == "paid" &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status", "updatedAt", "paidAt"
+        ]);
+    }
+
+    function canBuyerMarkSold(productId) {
+      let orderId = request.resource.data.soldOrderId;
+      return request.auth != null &&
+        resource.data.status == "active" &&
+        request.resource.data.status == "sold" &&
+        orderId is string &&
+        exists(/databases/$(database)/documents/orders/$(orderId)) &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.buyerId == request.auth.uid &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.productId == productId &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.status == "paid" &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status", "soldOrderId", "soldAt", "updatedAt"
+        ]);
     }
   }
 }

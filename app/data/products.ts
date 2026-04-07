@@ -18,6 +18,7 @@ export interface Product {
     postedAt: string;
     createdAt?: number;   // timestamp for sorting
     status?: "active" | "sold" | "removed"; // listing status
+    soldOrderId?: string;
 }
 
 export interface WishlistItem {

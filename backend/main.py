@@ -11,13 +11,15 @@ Features:
 """
 
 import io
+import os
 import logging
 from dotenv import load_dotenv
-load_dotenv()  # Load .env file for HF_TOKEN, SERPAPI_KEY, etc.
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))  # Load backend/.env
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from payos import PayOS, ItemData, PaymentData
+from payos import PayOS
+from payos.type import ItemData, PaymentData
 
 from services.metadata_analyzer import analyze_metadata
 from services.reverse_search import reverse_search
@@ -29,11 +31,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("resell-ai")
 
 # Init PayOS
-import os
 payos = PayOS(
-    client_id="4f902b55-1513-4080-ac3f-bc40ff2433f5",
-    api_key="3b6ab720-74fa-4d7f-9176-7a541e1f87ac",
-    checksum_key="e351d30a0887cd9466fdcde0b545ab7ebc3bbad2a03869aac05dc04836ee7fa8"
+    client_id=os.environ.get("PAYOS_CLIENT_ID", ""),
+    api_key=os.environ.get("PAYOS_API_KEY", ""),
+    checksum_key=os.environ.get("PAYOS_CHECKSUM_KEY", "")
 )
 
 app = FastAPI(
@@ -65,16 +66,16 @@ async def startup_event():
     serpapi_key = os.environ.get("SERPAPI_KEY", "")
     
     if hf_token:
-        logger.info("✅ HF_TOKEN configured — AI detection via HuggingFace API enabled")
+        logger.info(" HF_TOKEN configured — AI detection via HuggingFace API enabled")
     else:
-        logger.warning("⚠️ HF_TOKEN not set — AI detection will try local model fallback")
+        logger.warning(" HF_TOKEN not set — AI detection will try local model fallback")
     
     if serpapi_key:
-        logger.info("✅ SERPAPI_KEY configured — Reverse image search enabled")
+        logger.info(" SERPAPI_KEY configured — Reverse image search enabled")
     else:
-        logger.warning("⚠️ SERPAPI_KEY not set — Reverse image search disabled")
+        logger.warning(" SERPAPI_KEY not set — Reverse image search disabled")
     
-    logger.info("🟢 Service ready!")
+    logger.info(" Service ready!")
 
 
 @app.get("/")
@@ -154,7 +155,7 @@ async def analyze_image(image: UploadFile = File(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 @app.post("/api/payment/create-link")
 async def create_payment_link(request: Request):

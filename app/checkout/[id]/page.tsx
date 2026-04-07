@@ -1,17 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { getOrderById, updateOrderStatus } from "../../services/orderService";
+import { useParams } from "next/navigation";
+import { getOrderById } from "../../services/orderService";
 import { useAuth } from "../../components/auth/AuthProvider";
 import { Order } from "../../data/products";
-import React from "react";
 
 export default function CheckoutPage({ params }: { params: { id: string } }) {
-    const unwrappedParams = React.use(params as any) as { id: string };
-    const id = unwrappedParams.id;
+    const routeParams = useParams();
+    const idParam = routeParams?.id;
+    const id = Array.isArray(idParam) ? idParam[0] : idParam || params?.id;
 
-    const router = useRouter();
     const { user } = useAuth();
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
@@ -44,14 +43,10 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
         if (!order) return;
         setProcessingPayment(true);
         try {
-            // Update order status to pending before redirecting
-            await updateOrderStatus(order.id, "pending");
+            // Use timestamp tail to reduce collisions while keeping numeric format for PayOS.
+            const orderCode = Number(String(Date.now()).slice(-9));
 
-            // Generate orderCode from string id for PayOS (needs to be int)
-            const orderCode = Math.floor(Math.random() * 1000000000); // Temporary random ID for prototype
-
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-            const response = await fetch(`${apiUrl}/api/payment/create-link`, {
+            const response = await fetch("/api/payment/create-link", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -77,45 +72,125 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
             } else {
                 throw new Error("No checkout url returned from server");
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            if (err.message.includes("Failed to fetch")) {
-                alert("Lỗi kết nối: Backend Python (localhost:8000) chưa được bật! Vui lòng khởi động Backend.");
+            const errorMessage = err instanceof Error ? err.message : "Unknown payment error";
+
+            if (errorMessage.includes("Failed to fetch")) {
+                alert("Loi ket noi: khong the ket noi dich vu thanh toan. Vui long khoi dong backend.");
             } else {
-                alert(`Lỗi thanh toán: ${err.message}`);
+                alert(`Loi thanh toan: ${errorMessage}`);
             }
             setProcessingPayment(false);
         }
     };
 
-    if (loading) return <div className="p-8 text-center">Loading order details...</div>;
-    if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
+    if (loading) {
+        return (
+            <div className="max-w-3xl mx-auto px-4 md:px-8 py-10">
+                <div className="glass rounded-2xl p-8 text-center animate-fade-in">
+                    <p style={{ color: "var(--color-text-secondary)", fontWeight: 600 }}>Loading order details...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="max-w-3xl mx-auto px-4 md:px-8 py-10">
+                <div className="rounded-2xl p-8 text-center animate-fade-in" style={{ background: "rgba(255, 107, 107, 0.12)", border: "1px solid rgba(255, 107, 107, 0.35)" }}>
+                    <p style={{ color: "#ff9c9c", fontWeight: 600 }}>{error}</p>
+                </div>
+            </div>
+        );
+    }
+
     if (!order) return null;
 
+    const isPaid = order.status === "paid" || order.status === "shipped" || order.status === "completed";
+    const safePrice = Math.max(0, order.price);
+
     return (
-        <div className="max-w-2xl mx-auto p-4 md:p-8 mt-8">
-            <h1 className="text-3xl font-bold mb-6">Payment Checkout</h1>
-            <div className="bg-white p-6 rounded-xl shadow-lg mb-6">
-                <div className="flex gap-4 mb-4">
-                    <img src={order.productImage || "/placeholder.jpg"} alt={order.productTitle} className="w-24 h-24 object-cover rounded" />
-                    <div>
-                        <h2 className="text-xl font-semibold mb-2">{order.productTitle}</h2>
-                        <p className="text-gray-600 mb-2">Price: ${order.price.toLocaleString()}</p>
-                        <p className="text-sm text-gray-500">Payment Method: {order.paymentMethod.toUpperCase()}</p>
-                        <p className="text-sm text-gray-500">Status: <span className="font-medium text-orange-500">{order.status}</span></p>
-                    </div>
+        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-10">
+            <div className="animate-fade-in-up" style={{ marginBottom: "1.1rem" }}>
+                <h1
+                    style={{
+                        fontSize: "clamp(1.6rem, 2.8vw, 2.2rem)",
+                        fontWeight: 800,
+                        color: "var(--color-text-primary)",
+                        marginBottom: "0.35rem",
+                    }}
+                >
+                    Checkout
+                </h1>
+                <p style={{ color: "var(--color-text-muted)", fontSize: "0.92rem" }}>
+                    Confirm your order and continue to secure payment.
+                </p>
+            </div>
+
+            <div className="glass animate-fade-in-up" style={{ borderRadius: "var(--radius-xl)", overflow: "hidden" }}>
+                <div style={{ padding: "1rem", borderBottom: "1px solid var(--color-border)", background: "rgba(255,255,255,0.02)" }}>
+                    <span
+                        style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "0.32rem 0.7rem",
+                            borderRadius: "var(--radius-full)",
+                            fontSize: "0.78rem",
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                            color: isPaid ? "#74f0cc" : "#ffd39a",
+                            background: isPaid ? "rgba(0, 212, 170, 0.16)" : "rgba(255, 179, 71, 0.16)",
+                        }}
+                    >
+                        {order.status}
+                    </span>
                 </div>
 
-                <div className="border-t border-gray-200 mt-6 pt-6">
-                    <h3 className="font-semibold mb-4">Select Payment Method</h3>
-                    <div className="flex flex-col gap-3">
+                <div style={{ padding: "1.25rem" }}>
+                    <div className="flex flex-col sm:flex-row gap-4" style={{ marginBottom: "1rem" }}>
+                        <img
+                            src={order.productImage || "/placeholder.jpg"}
+                            alt={order.productTitle}
+                            className="w-full sm:w-36 h-40 sm:h-28 object-cover rounded-xl"
+                            style={{ border: "1px solid var(--color-border)" }}
+                        />
+                        <div style={{ flex: 1 }}>
+                            <h2 style={{ color: "var(--color-text-primary)", fontSize: "1.15rem", fontWeight: 700, marginBottom: "0.45rem", lineHeight: 1.35 }}>
+                                {order.productTitle}
+                            </h2>
+                            <p style={{ color: "var(--color-text-secondary)", marginBottom: "0.3rem" }}>
+                                Price: <span style={{ color: "var(--color-text-primary)", fontWeight: 700 }}>${safePrice.toLocaleString()}</span>
+                            </p>
+                            <p style={{ color: "var(--color-text-muted)", fontSize: "0.86rem" }}>
+                                Payment Method: {order.paymentMethod.toUpperCase()}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
+                        <h3 style={{ color: "var(--color-text-secondary)", fontWeight: 700, marginBottom: "0.85rem", fontSize: "0.95rem" }}>
+                            Select Payment Method
+                        </h3>
                         <button
                             onClick={handlePayment}
-                            disabled={processingPayment || order.status === "paid" || order.status === "shipped" || order.status === "completed"}
-                            className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-gray-400"
+                            disabled={processingPayment || isPaid}
+                            className="w-full py-3 rounded-xl font-semibold transition"
+                            style={{
+                                background: "var(--gradient-primary)",
+                                color: "#fff",
+                                boxShadow: "var(--shadow-glow)",
+                                opacity: processingPayment || isPaid ? 0.65 : 1,
+                                cursor: processingPayment || isPaid ? "not-allowed" : "pointer",
+                            }}
                         >
-                            {processingPayment ? "Processing..." : order.status === "paid" ? "Already Paid" : "Pay with PayOS (Bank Transfer)"}
+                            {processingPayment ? "Processing..." : isPaid ? "Already Paid" : "Pay with PayOS (Bank Transfer)"}
                         </button>
+
+                        <p style={{ color: "var(--color-text-muted)", fontSize: "0.8rem", marginTop: "0.65rem", textAlign: "center" }}>
+                            You will be redirected to PayOS to complete the transaction.
+                        </p>
                     </div>
                 </div>
             </div>

@@ -87,7 +87,7 @@ const ANALYZER_ICONS: Record<string, React.ReactNode> = {
 export default function ImageUploader({
     onImagesChange,
     maxFiles = 5,
-    apiUrl = "http://localhost:8000/api/analyze-image",
+    apiUrl = "/api/analyze-image",
 }: ImageUploaderProps) {
     const [images, setImages] = useState<UploadedImage[]>([]);
     const [isDragging, setIsDragging] = useState(false);
@@ -119,7 +119,16 @@ export default function ImageUploader({
                 if (!res.ok) {
                     const errorText = await res.text().catch(() => "Unknown error");
                     console.error("Analysis API error:", res.status, errorText);
-                    throw new Error(`Analysis failed (${res.status})`);
+
+                    let detail = "Analysis failed";
+                    try {
+                        const parsed = JSON.parse(errorText) as { detail?: string };
+                        if (parsed?.detail) detail = parsed.detail;
+                    } catch {
+                        if (errorText) detail = errorText;
+                    }
+
+                    throw new Error(`Analysis failed (${res.status}): ${detail}`);
                 }
                 const analysis: ImageAnalysis = await res.json();
 
@@ -131,7 +140,9 @@ export default function ImageUploader({
             } catch (err) {
                 const message = err instanceof Error && err.name === "AbortError"
                     ? "Analysis timed out — backend may be loading AI model. Try again."
-                    : "Analysis service unavailable";
+                    : err instanceof Error
+                        ? err.message
+                        : "Analysis service unavailable";
                 console.error("Image analysis error:", err);
                 setImages((prev) =>
                     prev.map((img) =>

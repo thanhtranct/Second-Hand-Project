@@ -124,7 +124,7 @@ export async function getProducts(category?: string): Promise<Product[]> {
     }
 
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(mapDocToProduct);
+    return snapshot.docs.map(mapDocToProduct).filter((p) => p.status === "active");
 }
 
 /**
@@ -160,7 +160,7 @@ export async function getProductsPaginated(
     }
 
     const snapshot = await getDocs(q);
-    const products = snapshot.docs.map(mapDocToProduct);
+    const products = snapshot.docs.map(mapDocToProduct).filter((p) => p.status === "active");
     const lastVisible = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
 
     return { products, lastVisible };

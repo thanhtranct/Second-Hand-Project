@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAuth } from "../components/auth/AuthProvider";
 import { applyForSeller } from "../services/sellerService";
 import { useRouter } from "next/navigation";
+import { ArrowRight, CheckCircle2, ShieldCheck, Store, UserRound } from "lucide-react";
 
 export default function SellerApplyPage() {
     const { user } = useAuth();
@@ -17,6 +18,17 @@ export default function SellerApplyPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState(false);
+
+    const fieldStyle: React.CSSProperties = {
+        width: "100%",
+        background: "rgba(255, 255, 255, 0.03)",
+        border: "1px solid var(--color-border)",
+        borderRadius: "var(--radius-md)",
+        padding: "0.72rem 0.9rem",
+        color: "var(--color-text-primary)",
+        outline: "none",
+        fontSize: "0.92rem",
+    };
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -52,94 +64,153 @@ export default function SellerApplyPage() {
 
     if (success) {
         return (
-            <div className="max-w-2xl mx-auto p-8 mt-12 bg-white rounded-xl shadow-lg text-center">
-                <h1 className="text-3xl font-bold text-green-600 mb-4">Application Submitted!</h1>
-                <p className="text-gray-600 mb-8">
-                    Your seller application is under review. Our team will contact you within 1-2 business days.
-                </p>
-                <button
-                    onClick={() => router.push("/")}
-                    className="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700 transition"
-                >
-                    Return to Home
-                </button>
+            <div className="max-w-2xl mx-auto px-4 md:px-8 py-10">
+                <div className="glass rounded-3xl p-8 md:p-10 text-center animate-fade-in-up">
+                    <div
+                        style={{
+                            width: "70px",
+                            height: "70px",
+                            margin: "0 auto 1rem",
+                            borderRadius: "50%",
+                            background: "rgba(0, 212, 170, 0.14)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            border: "1px solid rgba(0, 212, 170, 0.35)",
+                        }}
+                    >
+                        <CheckCircle2 size={34} color="#5de7c2" />
+                    </div>
+
+                    <h1 style={{ color: "var(--color-text-primary)", fontSize: "1.8rem", fontWeight: 800, marginBottom: "0.5rem" }}>
+                        Application Submitted
+                    </h1>
+                    <p style={{ color: "var(--color-text-secondary)", marginBottom: "1.4rem" }}>
+                        Your seller application is now under review. We usually respond within 1-2 business days.
+                    </p>
+
+                    <button
+                        onClick={() => router.push("/")}
+                        className="px-6 py-3 rounded-xl font-semibold transition"
+                        style={{
+                            background: "var(--gradient-primary)",
+                            color: "#fff",
+                            boxShadow: "var(--shadow-glow)",
+                        }}
+                    >
+                        Return to Home
+                    </button>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="max-w-2xl mx-auto p-4 md:p-8 mt-8">
-            <h1 className="text-3xl font-bold mb-6">Become a Seller</h1>
-            <p className="text-gray-600 mb-8">
-                Join our marketplace to start selling your secondhand items safely and securely.
-                Please provide your details below.
-            </p>
+        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-10">
+            <div className="animate-fade-in-up" style={{ marginBottom: "1.1rem" }}>
+                <h1 style={{ color: "var(--color-text-primary)", fontSize: "clamp(1.7rem, 3.1vw, 2.35rem)", fontWeight: 800, marginBottom: "0.45rem" }}>
+                    Become a Seller
+                </h1>
+                <p style={{ color: "var(--color-text-muted)", fontSize: "0.94rem" }}>
+                    Open your store and start selling verified secondhand items to trusted buyers.
+                </p>
+            </div>
 
-            <form onSubmit={handleSubmit} className="bg-white p-6 md:p-8 rounded-xl shadow-lg space-y-6">
+            <div className="grid md:grid-cols-3 gap-3 mb-4 animate-fade-in-up">
+                <div className="glass rounded-xl p-3" style={{ color: "var(--color-text-secondary)" }}>
+                    <UserRound size={16} style={{ marginBottom: "0.45rem", color: "var(--color-primary-light)" }} />
+                    <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-text-primary)" }}>Identity Check</p>
+                    <p style={{ fontSize: "0.75rem" }}>Secure seller verification</p>
+                </div>
+                <div className="glass rounded-xl p-3" style={{ color: "var(--color-text-secondary)" }}>
+                    <Store size={16} style={{ marginBottom: "0.45rem", color: "var(--color-primary-light)" }} />
+                    <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-text-primary)" }}>Store Profile</p>
+                    <p style={{ fontSize: "0.75rem" }}>Build buyer credibility</p>
+                </div>
+                <div className="glass rounded-xl p-3" style={{ color: "var(--color-text-secondary)" }}>
+                    <ShieldCheck size={16} style={{ marginBottom: "0.45rem", color: "var(--color-primary-light)" }} />
+                    <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-text-primary)" }}>Safe Trading</p>
+                    <p style={{ fontSize: "0.75rem" }}>Protected marketplace tools</p>
+                </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="glass rounded-2xl p-5 md:p-7 animate-fade-in-up" style={{ display: "grid", gap: "1rem" }}>
                 {error && (
-                    <div className="p-4 bg-red-50 text-red-700 rounded-lg">
+                    <div className="rounded-xl p-3" style={{ background: "rgba(255, 107, 107, 0.12)", border: "1px solid rgba(255, 107, 107, 0.35)", color: "#ffb3b3" }}>
                         {error}
                     </div>
                 )}
                 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+                    <label className="block mb-2" style={{ color: "var(--color-text-secondary)", fontSize: "0.84rem", fontWeight: 700 }}>Full Name</label>
                     <input
                         type="text"
                         name="fullName"
                         value={formData.fullName}
                         onChange={handleInputChange}
                         required
-                        className="w-full border border-gray-300 rounded px-4 py-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Your legal full name"
+                        style={fieldStyle}
                     />
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                    <label className="block mb-2" style={{ color: "var(--color-text-secondary)", fontSize: "0.84rem", fontWeight: 700 }}>Phone Number</label>
                     <input
                         type="tel"
                         name="phoneNumber"
                         value={formData.phoneNumber}
                         onChange={handleInputChange}
                         required
-                        className="w-full border border-gray-300 rounded px-4 py-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Example: 09xxxxxxxx"
+                        style={fieldStyle}
                     />
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Store Name</label>
+                    <label className="block mb-2" style={{ color: "var(--color-text-secondary)", fontSize: "0.84rem", fontWeight: 700 }}>Store Name</label>
                     <input
                         type="text"
                         name="storeName"
                         value={formData.storeName}
                         onChange={handleInputChange}
                         required
-                        className="w-full border border-gray-300 rounded px-4 py-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="What should buyers see?"
+                        style={fieldStyle}
                     />
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Why do you want to become a seller?</label>
+                    <label className="block mb-2" style={{ color: "var(--color-text-secondary)", fontSize: "0.84rem", fontWeight: 700 }}>Why do you want to become a seller?</label>
                     <textarea
                         name="description"
                         value={formData.description}
                         onChange={handleInputChange}
                         required
-                        rows={4}
-                        className="w-full border border-gray-300 rounded px-4 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    ></textarea>
+                        rows={5}
+                        placeholder="Tell us what you want to sell and your experience."
+                        style={{ ...fieldStyle, resize: "vertical" }}
+                    />
                 </div>
 
-                <div className="pt-4 border-t border-gray-200 text-sm text-gray-500 mb-6">
+                <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "0.9rem", color: "var(--color-text-muted)", fontSize: "0.82rem" }}>
                     By submitting this application, you agree to our terms and conditions for sellers. Your identity will be verified before your account is approved.
                 </div>
 
                 <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-black text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition disabled:bg-gray-400"
+                    className="w-full py-3 rounded-xl font-semibold transition flex items-center justify-center gap-2"
+                    style={{
+                        background: "var(--gradient-primary)",
+                        color: "#fff",
+                        opacity: loading ? 0.7 : 1,
+                        boxShadow: "var(--shadow-glow)",
+                        cursor: loading ? "not-allowed" : "pointer",
+                    }}
                 >
                     {loading ? "Submitting..." : "Submit Application"}
+                    {!loading && <ArrowRight size={16} />}
                 </button>
             </form>
         </div>

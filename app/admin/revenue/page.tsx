@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import ProtectedRoute from "../../components/auth/ProtectedRoute";
-import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { Order } from "../../data/products";
 import { DollarSign, TrendingUp, Calendar, CreditCard } from "lucide-react";
@@ -20,8 +20,7 @@ function AdminRevenueContent() {
         try {
             const q = query(
                 collection(db, "orders"),
-                where("status", "in", ["paid", "shipped", "completed"]),
-                orderBy("createdAt", "desc")
+                where("status", "in", ["paid", "shipped", "completed"])
             );
             const snapshot = await getDocs(q);
             const data: Order[] = [];
@@ -40,6 +39,7 @@ function AdminRevenueContent() {
                     createdAt: docData.createdAt?.toMillis?.() || Date.now(),
                 });
             });
+            data.sort((a, b) => b.createdAt - a.createdAt);
             setOrders(data);
         } catch (err) {
             console.error("Failed to fetch orders for revenue", err);
