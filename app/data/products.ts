@@ -33,6 +33,11 @@ export interface UserProfile {
     photoURL: string;
     role: "user" | "seller" | "admin";
     createdAt: number;
+
+    // Seller bank info — required for payout
+    bankCode?: string;           // e.g. "MBBank", "Vietcombank"
+    bankAccountNumber?: string;  // account number
+    bankAccountHolder?: string;  // account holder name
 }
 
 export interface ChatRoom {
@@ -59,12 +64,26 @@ export interface Order {
     productTitle: string;
     productImage: string;
     price: number;
+    amountVND?: number;     // VND amount for SePay verification
     buyerId: string;
     sellerId: string;
-    status: "pending" | "paid" | "confirmed" | "shipped" | "completed" | "cancelled";
-    paymentMethod: "momo" | "zalopay" | "cod" | "payos";
-    orderCode?: number;  // PayOS integer order code — set when payment link is created
+    status: "pending" | "paid" | "shipped" | "delivered" | "completed" | "cancelled";
+    paymentMethod: "bank_transfer" | "cod";
+
+    // SePay payment fields
+    paymentCode?: string;           // e.g. "DH849301"
+    sepayTransactionId?: number;    // SePay transaction ID — set by webhook
+    bankReferenceCode?: string;     // bank reference code — set by webhook
+
+    // Escrow payout tracking
+    payoutStatus?: "none" | "pending_release" | "released";
+    deliveredAt?: number;       // timestamp buyer confirmed receipt
+    releasedAt?: number;        // timestamp admin released payment
+    releasedBy?: string;        // admin UID who released
+
     createdAt: number;
+    updatedAt?: number;
+    paidAt?: number;
 }
 
 export interface SellerApplication {

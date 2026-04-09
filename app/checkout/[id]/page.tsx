@@ -1,10 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
-import { getOrderById, updateOrderStatus } from "../../services/orderService";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
+import { getOrderById } from "../../services/orderService";
 import { useAuth } from "../../components/auth/AuthProvider";
 import { Order } from "../../data/products";
+import { USD_TO_VND, PAYMENT_POLL_INTERVAL_MS } from "../../config/constants";
+import Link from "next/link";
+
+interface CheckoutInfo {
+    paymentCode: string;
+    qrUrl: string;
+    bankName: string;
+    bankCode: string;
+    accountNumber: string;
+    accountHolder: string;
+    amount: number;
+    transferContent: string;
+}
 
 export default function CheckoutPage({ params }: { params: { id: string } }) {
     const routeParams = useParams();
@@ -15,7 +28,10 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [processingPayment, setProcessingPayment] = useState(false);
+    const [checkoutInfo, setCheckoutInfo] = useState<CheckoutInfo | null>(null);
+    const [creatingCheckout, setCreatingCheckout] = useState(false);
+    const [paymentStatus, setPaymentStatus] = useState<string>("pending");
+    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
         if (!user) return;
@@ -23,15 +39,16 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
             try {
                 const fetchedOrder = await getOrderById(id);
                 if (!fetchedOrder) {
-                    setError("Order not found");
+                    setError("No order found.");
                 } else if (fetchedOrder.buyerId !== user.uid) {
-                    setError("You are not authorized to view this order");
+                    setError("You do not have permission to view this order.");
                 } else {
                     setOrder(fetchedOrder);
+                    setPaymentStatus(fetchedOrder.status);
                 }
             } catch (err: unknown) {
                 console.error(err);
-                setError("Failed to fetch order details");
+                setError("Unable to load order information. Please try again later.");
             } finally {
                 setLoading(false);
             }
@@ -39,61 +56,86 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
         fetchOrder();
     }, [id, user]);
 
-    /** Deterministic order code derived from the Firestore order ID. */
-    const buildOrderCode = (orderId: string): number => {
-        let hash = 5381;
-        for (let i = 0; i < orderId.length; i++) {
-            hash = ((hash << 5) + hash) + orderId.charCodeAt(i);
-            hash = hash & 0x7fffffff; // keep positive 31-bit int
-        }
-        return (hash % 999_999_999) + 1; // ensure range 1–999 999 999
-    };
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => {
+            if (pollRef.current) clearInterval(pollRef.current);
+        };
+    }, []);
 
-    const handlePayment = async () => {
-        if (!order) return;
-        setProcessingPayment(true);
+    const getAuthToken = useCallback(async () => {
+        if (!user) return "";
         try {
-            // Update order status to pending before redirecting
-            await updateOrderStatus(order.id, "pending");
+            return await user.getIdToken();
+        } catch {
+            return "";
+        }
+    }, [user]);
 
-            // Generate orderCode from string id for PayOS (needs to be int)
-            const orderCode = Math.floor(Math.random() * 1000000000); // Temporary random ID for prototype
+    const startPolling = useCallback((orderId: string) => {
+        if (pollRef.current) clearInterval(pollRef.current);
 
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-            const response = await fetch(`${apiUrl}/api/payment/create-link`, {
+        pollRef.current = setInterval(async () => {
+            try {
+                const token = await getAuthToken();
+                const res = await fetch(`/api/payment/status/${orderId}`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status && data.status !== "pending") {
+                        setPaymentStatus(data.status);
+                        if (pollRef.current) clearInterval(pollRef.current);
+                    }
+                }
+            } catch {
+                // silently retry on next interval
+            }
+        }, PAYMENT_POLL_INTERVAL_MS);
+    }, [getAuthToken]);
+
+    const handleCreateCheckout = async () => {
+        if (!order || !user) return;
+        setCreatingCheckout(true);
+        try {
+            const token = await getAuthToken();
+            const amountVND = Math.max(Math.round(order.price * USD_TO_VND), 2000);
+
+            const response = await fetch("/api/payment/create-checkout", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
                 body: JSON.stringify({
                     orderId: order.id,
-                    orderCode,
-                    amount: Math.max(Math.round(order.price * 25000), 2000), // Convert USD to VND, PayOS min is 2000
-                    description: "Mua hang",
-                    returnUrl: `${window.location.origin}/payment/success?orderId=${order.id}`,
-                    cancelUrl: `${window.location.origin}/payment/cancel?orderId=${order.id}`,
+                    amount: amountVND,
                 }),
             });
 
             if (!response.ok) {
                 const errorText = await response.text();
-                throw new Error(`Server returned ${response.status}: ${errorText}`);
+                let detail = errorText;
+                try {
+                    const parsed = JSON.parse(errorText) as { detail?: string };
+                    if (parsed?.detail) detail = parsed.detail;
+                } catch { /* keep raw */ }
+                throw new Error(`Server ${response.status}: ${detail}`);
             }
 
-            const data = await response.json();
-            if (!data.checkoutUrl) {
-                throw new Error("No checkout url returned from server");
-            }
-        } catch (err: any) {
+            const data: CheckoutInfo = await response.json();
+            setCheckoutInfo(data);
+            startPolling(order.id);
+        } catch (err: unknown) {
             console.error(err);
-            const errorMessage = err instanceof Error ? err.message : "Unknown payment error";
-
-            if (errorMessage.includes("Failed to fetch")) {
-                alert("Loi ket noi: khong the ket noi dich vu thanh toan. Vui long khoi dong backend.");
+            const msg = err instanceof Error ? err.message : "Payment error";
+            if (msg.includes("Failed to fetch")) {
+                alert("Unable to connect to the payment service. Please start the backend.");
             } else {
-                alert(`Loi thanh toan: ${errorMessage}`);
+                alert(`Error: ${msg}`);
             }
-            setProcessingPayment(false);
+        } finally {
+            setCreatingCheckout(false);
         }
     };
 
@@ -101,7 +143,7 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
         return (
             <div className="max-w-3xl mx-auto px-4 md:px-8 py-10">
                 <div className="glass rounded-2xl p-8 text-center animate-fade-in">
-                    <p style={{ color: "var(--color-text-secondary)", fontWeight: 600 }}>Loading order details...</p>
+                    <p style={{ color: "var(--color-text-secondary)", fontWeight: 600 }}>Đang tải thông tin đơn hàng...</p>
                 </div>
             </div>
         );
@@ -119,47 +161,37 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
 
     if (!order) return null;
 
-    const isPaid = order.status === "paid" || order.status === "shipped" || order.status === "completed";
+    const isPaid = paymentStatus === "paid" || paymentStatus === "shipped" || paymentStatus === "delivered" || paymentStatus === "completed";
+    const isCancelled = paymentStatus === "cancelled";
     const safePrice = Math.max(0, order.price);
+    const amountVND = Math.round(safePrice * USD_TO_VND);
 
     return (
         <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-10">
             <div className="animate-fade-in-up" style={{ marginBottom: "1.1rem" }}>
-                <h1
-                    style={{
-                        fontSize: "clamp(1.6rem, 2.8vw, 2.2rem)",
-                        fontWeight: 800,
-                        color: "var(--color-text-primary)",
-                        marginBottom: "0.35rem",
-                    }}
-                >
-                    Checkout
+                <h1 style={{ fontSize: "clamp(1.6rem, 2.8vw, 2.2rem)", fontWeight: 800, color: "var(--color-text-primary)", marginBottom: "0.35rem" }}>
+                    Payment
                 </h1>
                 <p style={{ color: "var(--color-text-muted)", fontSize: "0.92rem" }}>
-                    Confirm your order and continue to secure payment.
+                    Confirm your order and transfer the payment to complete the transaction.
                 </p>
             </div>
 
             <div className="glass animate-fade-in-up" style={{ borderRadius: "var(--radius-xl)", overflow: "hidden" }}>
+                {/* Status badge */}
                 <div style={{ padding: "1rem", borderBottom: "1px solid var(--color-border)", background: "rgba(255,255,255,0.02)" }}>
-                    <span
-                        style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "0.32rem 0.7rem",
-                            borderRadius: "var(--radius-full)",
-                            fontSize: "0.78rem",
-                            fontWeight: 700,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.04em",
-                            color: isPaid ? "#74f0cc" : "#ffd39a",
-                            background: isPaid ? "rgba(0, 212, 170, 0.16)" : "rgba(255, 179, 71, 0.16)",
-                        }}
-                    >
-                        {order.status}
+                    <span style={{
+                        display: "inline-flex", alignItems: "center", padding: "0.32rem 0.7rem",
+                        borderRadius: "var(--radius-full)", fontSize: "0.78rem", fontWeight: 700,
+                        textTransform: "uppercase", letterSpacing: "0.04em",
+                        color: isPaid ? "#74f0cc" : isCancelled ? "#ff9c9c" : "#ffd39a",
+                        background: isPaid ? "rgba(0, 212, 170, 0.16)" : isCancelled ? "rgba(255, 107, 107, 0.16)" : "rgba(255, 179, 71, 0.16)",
+                    }}>
+                        {paymentStatus}
                     </span>
                 </div>
 
+                {/* Order summary */}
                 <div style={{ padding: "1.25rem" }}>
                     <div className="flex flex-col sm:flex-row gap-4" style={{ marginBottom: "1rem" }}>
                         <img
@@ -173,30 +205,119 @@ export default function CheckoutPage({ params }: { params: { id: string } }) {
                                 {order.productTitle}
                             </h2>
                             <p style={{ color: "var(--color-text-secondary)", marginBottom: "0.3rem" }}>
-                                Price: <span style={{ color: "var(--color-text-primary)", fontWeight: 700 }}>${safePrice.toLocaleString()}</span>
+                                Giá: <span style={{ color: "var(--color-text-primary)", fontWeight: 700 }}>${safePrice.toLocaleString()}</span>
+                                <span style={{ color: "var(--color-text-muted)", marginLeft: "0.5rem", fontSize: "0.85rem" }}>({amountVND.toLocaleString()} VND)</span>
                             </p>
                             <p style={{ color: "var(--color-text-muted)", fontSize: "0.86rem" }}>
-                                Payment Method: {order.paymentMethod.toUpperCase()}
+                                Phương thức: Chuyển khoản ngân hàng
                             </p>
                         </div>
                     </div>
 
-                    <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
-                        <h3 style={{ color: "var(--color-text-secondary)", fontWeight: 700, marginBottom: "0.85rem", fontSize: "0.95rem" }}>
-                            Select Payment Method
-                        </h3>
-                        <button
-                            onClick={handlePayment}
-                            disabled={processingPayment || order.status === "paid" || order.status === "shipped" || order.status === "completed"}
-                            className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-gray-400"
-                        >
-                            {processingPayment ? "Processing..." : order.status === "paid" ? "Already Paid" : "Pay with PayOS (Bank Transfer)"}
-                        </button>
+                    {/* Payment success */}
+                    {isPaid && (
+                        <div style={{ padding: "1.5rem", textAlign: "center", background: "rgba(0, 212, 170, 0.08)", borderRadius: "var(--radius-lg)", border: "1px solid rgba(0, 212, 170, 0.25)" }}>
+                            <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>✅</div>
+                            <h3 style={{ color: "#74f0cc", fontWeight: 700, fontSize: "1.15rem", marginBottom: "0.4rem" }}>
+                                Thanh toán thành công!
+                            </h3>
+                            <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9rem" }}>
+                                Đơn hàng đã được xác nhận. Chờ seller gửi hàng.
+                            </p>
+                            <Link href="/profile" style={{ display: "inline-block", marginTop: "1rem", color: "var(--color-primary)", fontWeight: 600, fontSize: "0.9rem" }}>
+                                Xem đơn hàng →
+                            </Link>
+                        </div>
+                    )}
 
-                        <p style={{ color: "var(--color-text-muted)", fontSize: "0.8rem", marginTop: "0.65rem", textAlign: "center" }}>
-                            You will be redirected to PayOS to complete the transaction.
-                        </p>
-                    </div>
+                    {/* Cancelled */}
+                    {isCancelled && (
+                        <div style={{ padding: "1.5rem", textAlign: "center", background: "rgba(255, 107, 107, 0.08)", borderRadius: "var(--radius-lg)", border: "1px solid rgba(255, 107, 107, 0.25)" }}>
+                            <h3 style={{ color: "#ff9c9c", fontWeight: 700 }}>Đơn hàng đã bị huỷ</h3>
+                            <Link href="/products" style={{ display: "inline-block", marginTop: "0.75rem", color: "var(--color-primary)", fontWeight: 600, fontSize: "0.9rem" }}>
+                                Quay lại mua sắm →
+                            </Link>
+                        </div>
+                    )}
+
+                    {/* QR Payment section */}
+                    {!isPaid && !isCancelled && (
+                        <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
+                            {!checkoutInfo ? (
+                                <>
+                                    <h3 style={{ color: "var(--color-text-secondary)", fontWeight: 700, marginBottom: "0.85rem", fontSize: "0.95rem" }}>
+                                        Thanh toán chuyển khoản ngân hàng
+                                    </h3>
+                                    <button
+                                        onClick={handleCreateCheckout}
+                                        disabled={creatingCheckout}
+                                        className="w-full py-3 rounded-lg font-medium transition"
+                                        style={{
+                                            background: creatingCheckout ? "var(--color-border)" : "var(--gradient-primary)",
+                                            color: "#fff", fontWeight: 700, fontSize: "1rem",
+                                            cursor: creatingCheckout ? "not-allowed" : "pointer",
+                                        }}
+                                    >
+                                        {creatingCheckout ? "Đang tạo mã thanh toán..." : "Tạo mã QR thanh toán"}
+                                    </button>
+                                    <p style={{ color: "var(--color-text-muted)", fontSize: "0.8rem", marginTop: "0.65rem", textAlign: "center" }}>
+                                        Quét mã QR bằng app ngân hàng để thanh toán
+                                    </p>
+                                </>
+                            ) : (
+                                <div>
+                                    <h3 style={{ color: "var(--color-text-secondary)", fontWeight: 700, marginBottom: "1rem", fontSize: "0.95rem", textAlign: "center" }}>
+                                        Quét mã QR để thanh toán
+                                    </h3>
+
+                                    {/* QR Code */}
+                                    <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
+                                        <img
+                                            src={checkoutInfo.qrUrl}
+                                            alt="QR thanh toán"
+                                            style={{ width: "220px", height: "220px", margin: "0 auto", borderRadius: "var(--radius-lg)", border: "2px solid var(--color-border)" }}
+                                        />
+                                    </div>
+
+                                    {/* Bank transfer info */}
+                                    <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: "var(--radius-lg)", padding: "1rem", border: "1px solid var(--color-border)" }}>
+                                        <div style={{ display: "grid", gap: "0.6rem" }}>
+                                            {[
+                                                { label: "Ngân hàng", value: checkoutInfo.bankName },
+                                                { label: "Số tài khoản", value: checkoutInfo.accountNumber },
+                                                { label: "Chủ tài khoản", value: checkoutInfo.accountHolder },
+                                                { label: "Số tiền", value: `${checkoutInfo.amount.toLocaleString()} VND` },
+                                                { label: "Nội dung CK", value: checkoutInfo.transferContent },
+                                            ].map((row) => (
+                                                <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.35rem 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                                                    <span style={{ color: "var(--color-text-muted)", fontSize: "0.85rem" }}>{row.label}</span>
+                                                    <span style={{ color: "var(--color-text-primary)", fontWeight: 700, fontSize: "0.9rem", textAlign: "right" }}>{row.value}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Polling indicator */}
+                                    <div style={{ marginTop: "1rem", textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>
+                                        <div style={{
+                                            width: "8px", height: "8px", borderRadius: "50%",
+                                            background: "#ffd39a", animation: "pulse 1.5s ease-in-out infinite",
+                                        }} />
+                                        <span style={{ color: "var(--color-text-muted)", fontSize: "0.82rem" }}>
+                                            Đang chờ xác nhận thanh toán...
+                                        </span>
+                                    </div>
+
+                                    <Link
+                                        href={`/payment/cancel?orderId=${order.id}`}
+                                        style={{ display: "block", marginTop: "1rem", textAlign: "center", color: "var(--color-text-muted)", fontSize: "0.82rem", textDecoration: "underline" }}
+                                    >
+                                        Huỷ thanh toán
+                                    </Link>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

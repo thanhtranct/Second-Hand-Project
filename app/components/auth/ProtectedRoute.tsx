@@ -3,16 +3,17 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "./AuthProvider";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2, Lock, Store } from "lucide-react";
 import Button from "../ui/Button";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   adminOnly?: boolean;
+  sellerOnly?: boolean;
 }
 
-export default function ProtectedRoute({ children, adminOnly = false }: ProtectedRouteProps) {
-  const { user, isAdmin, loading } = useAuth();
+export default function ProtectedRoute({ children, adminOnly = false, sellerOnly = false }: ProtectedRouteProps) {
+  const { user, isAdmin, isSeller, loading } = useAuth();
   const router = useRouter();
 
   if (loading) {
@@ -77,6 +78,51 @@ export default function ProtectedRoute({ children, adminOnly = false }: Protecte
           </Button>
           <Button variant="outline" onClick={() => router.push("/auth/signup")}>
             Create Account
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (sellerOnly && !isSeller) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "60vh",
+          gap: "1.5rem",
+          padding: "2rem",
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            width: "80px",
+            height: "80px",
+            borderRadius: "50%",
+            background: "rgba(108,99,255,0.1)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Store size={36} color="var(--color-primary)" />
+        </div>
+        <h2 style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--color-text-primary)" }}>
+          Seller Account Required
+        </h2>
+        <p style={{ fontSize: "0.92rem", color: "var(--color-text-muted)", maxWidth: "440px" }}>
+          You need a seller account to list items. Apply to become a seller and start selling your secondhand items.
+        </p>
+        <div style={{ display: "flex", gap: "0.75rem" }}>
+          <Button onClick={() => router.push("/seller-apply")}>
+            Apply to Sell
+          </Button>
+          <Button variant="outline" onClick={() => router.push("/")}>
+            Back to Home
           </Button>
         </div>
       </div>

@@ -24,6 +24,8 @@ const steps = [
     { label: "Review", icon: Check },
 ];
 
+const TRUST_BLOCK_THRESHOLD = 40;
+
 function SellContent() {
     const { user } = useAuth();
     const router = useRouter();
@@ -42,12 +44,21 @@ function SellContent() {
         { id: string; file?: File; preview: string; status: string; analysis?: { trustScore: number; classification: string } }[]
     >([]);
 
+    // True if any analysed image has trust score below the threshold
+    const hasTrustBlockedImages = images.some(
+        (img) => img.status === "done" && img.analysis && img.analysis.trustScore < TRUST_BLOCK_THRESHOLD
+    );
+
     const updateField = (field: keyof SellFormFields, value: string) =>
         setForm((prev) => ({ ...prev, [field]: value }));
 
     const validateStep = (): string | null => {
         if (step === 0) {
             if (images.length === 0) return "Please upload at least one photo.";
+            if (hasTrustBlockedImages)
+                return "One or more images have a trust score below " + TRUST_BLOCK_THRESHOLD + "%. Please remove them before continuing.";
+            const stillAnalyzing = images.some((img) => img.status === "analyzing" || img.status === "rate-limited");
+            if (stillAnalyzing) return "Please wait for all images to finish analysis before continuing. Some images are waiting to retry due to rate limits.";
         }
         if (step === 1) {
             if (!form.title.trim()) return "Title is required.";
@@ -151,6 +162,7 @@ function SellContent() {
                     onImagesChange={setImages}
                     maxFiles={5}
                     overallTrust={overallTrust}
+                    images={images}
                 />
             )}
 
@@ -198,6 +210,7 @@ function SellContent() {
                     {step < 2 ? (
                         <Button
                             onClick={handleNext}
+                            disabled={step === 0 && hasTrustBlockedImages}
                             icon={<ChevronRight size={16} />}
                         >
                             Continue
@@ -254,7 +267,7 @@ function SellContent() {
 
 export default function SellPage() {
     return (
-        <ProtectedRoute>
+        <ProtectedRoute sellerOnly>
             <SellContent />
         </ProtectedRoute>
     );

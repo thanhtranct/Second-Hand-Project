@@ -30,12 +30,21 @@ function mapDocToOrder(d: DocumentSnapshot): Order {
         productTitle: data.productTitle || "",
         productImage: data.productImage || "",
         price: data.price || 0,
+        amountVND: data.amountVND ?? undefined,
         buyerId: data.buyerId || "",
         sellerId: data.sellerId || "",
         status: data.status || "pending",
         paymentMethod: data.paymentMethod || "cod",
-        orderCode: data.orderCode ?? undefined,
+        paymentCode: data.paymentCode ?? undefined,
+        sepayTransactionId: data.sepayTransactionId ?? undefined,
+        bankReferenceCode: data.bankReferenceCode ?? undefined,
+        payoutStatus: data.payoutStatus ?? "none",
+        deliveredAt: data.deliveredAt?.toMillis?.() ?? undefined,
+        releasedAt: data.releasedAt?.toMillis?.() ?? undefined,
+        releasedBy: data.releasedBy ?? undefined,
         createdAt: data.createdAt?.toMillis?.() || Date.now(),
+        updatedAt: data.updatedAt?.toMillis?.() ?? undefined,
+        paidAt: data.paidAt?.toMillis?.() ?? undefined,
     };
 }
 
@@ -82,11 +91,12 @@ export async function updateOrderStatus(id: string, status: Order["status"]): Pr
 }
 
 export async function completePayment(orderId: string, userId: string): Promise<void> {
-    await runTransaction(db, async (tx) => {
-        // ── ALL READS FIRST (Firestore requirement) ────────────────────
-        const orderRef = doc(db, ORDERS_COLLECTION, orderId);
-        const orderSnap = await tx.get(orderRef);
+    const orderRef = doc(db, ORDERS_COLLECTION, orderId);
+    const productRef = (productId: string) => doc(db, "products", productId);
 
+    await runTransaction(db, async (transaction) => {
+        // Step 1 — Read order inside transaction
+        const orderSnap = await transaction.get(orderRef);
         if (!orderSnap.exists()) {
             throw new Error("Order not found");
         }
@@ -96,22 +106,24 @@ export async function completePayment(orderId: string, userId: string): Promise<
             throw new Error("You are not authorized to complete this payment");
         }
 
-        if (order.status === "paid" || order.status === "shipped" || order.status === "completed") {
+        // Idempotent: skip if already processed
+        if (order.status === "paid" || order.status === "shipped" || order.status === "delivered" || order.status === "completed") {
             return;
         }
 
-        const productRef = doc(db, "products", order.productId);
-        const productSnap = await tx.get(productRef);
+        // Step 2 — Read product inside transaction to check precondition
+        const prodRef = productRef(order.productId);
+        const productSnap = await transaction.get(prodRef);
 
-        // ── ALL WRITES AFTER (Firestore requirement) ─────────────────────
-        tx.update(orderRef, {
+        // Step 3 — Atomic writes: order paid + product sold
+        transaction.update(orderRef, {
             status: "paid",
             updatedAt: serverTimestamp(),
             paidAt: serverTimestamp(),
         });
 
-        if (productSnap.exists()) {
-            tx.update(productRef, {
+        if (productSnap.exists() && productSnap.data()?.status === "active") {
+            transaction.update(prodRef, {
                 status: "sold",
                 soldOrderId: orderId,
                 soldAt: serverTimestamp(),

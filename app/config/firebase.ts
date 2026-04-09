@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, setPersistence, browserSessionPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported } from "firebase/analytics";
@@ -17,8 +17,15 @@ const firebaseConfig = {
 // Initialize Firebase (prevent duplicate initialization)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
 
-// Services
 export const auth = getAuth(app);
+
+// Use session persistence so new tabs don't share the same login session
+if (typeof window !== "undefined") {
+    setPersistence(auth, browserSessionPersistence).catch((error) => {
+        console.error("Failed to set auth persistence:", error);
+    });
+}
+
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 

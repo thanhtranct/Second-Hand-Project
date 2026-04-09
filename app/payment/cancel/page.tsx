@@ -2,11 +2,35 @@
 
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useAuth } from "../../components/auth/AuthProvider";
+import { getOrderById, updateOrderStatus } from "../../services/orderService";
 
 function PaymentCancelContent() {
     const searchParams = useSearchParams();
     const orderId = searchParams.get("orderId");
+    const { user } = useAuth();
+    const [cancelling, setCancelling] = useState(true);
+
+    useEffect(() => {
+        const cancelOrder = async () => {
+            if (!orderId || !user) {
+                setCancelling(false);
+                return;
+            }
+            try {
+                const order = await getOrderById(orderId);
+                if (order && order.status === "pending" && order.buyerId === user.uid) {
+                    await updateOrderStatus(orderId, "cancelled");
+                }
+            } catch (err) {
+                console.error("Failed to cancel order", err);
+            } finally {
+                setCancelling(false);
+            }
+        };
+        cancelOrder();
+    }, [orderId, user]);
 
     return (
         <div className="max-w-md mx-auto mt-16 p-8 bg-white rounded-xl shadow-lg text-center">
@@ -17,7 +41,9 @@ function PaymentCancelContent() {
             </div>
             <h1 className="text-2xl font-bold mb-2">Payment Cancelled</h1>
             <p className="text-gray-600 mb-6">
-                You cancelled the payment process. Your order has been placed but is pending payment.
+                {cancelling
+                    ? "Cancelling your order..."
+                    : "Your order has been cancelled. No payment was processed."}
             </p>
             <div className="space-y-3">
                 {orderId && (

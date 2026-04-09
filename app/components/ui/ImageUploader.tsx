@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { Upload, X, Loader2, ShieldCheck, AlertTriangle, ShieldX, Camera, Info, ChevronDown, ChevronUp, Globe, Cpu, Paintbrush, CameraIcon } from "lucide-react";
+import { Upload, X, Loader2, ShieldCheck, AlertTriangle, ShieldX, Camera, Info, ChevronDown, ChevronUp, Globe, Cpu, Paintbrush, CameraIcon, Clock } from "lucide-react";
 
-type AnalysisStatus = "idle" | "uploading" | "analyzing" | "done" | "error";
+type AnalysisStatus = "idle" | "uploading" | "analyzing" | "done" | "error" | "rate-limited";
 type Classification = "original" | "web-sourced" | "edited" | "ai-generated";
 
 interface AnalyzerSummary {
@@ -51,6 +51,8 @@ interface UploadedImage {
     status: AnalysisStatus;
     analysis?: ImageAnalysis;
     error?: string;
+    retryAt?: number; // timestamp when auto-retry fires
+    retryCountdown?: number; // seconds remaining
 }
 
 interface ImageUploaderProps {
@@ -99,6 +101,23 @@ export default function ImageUploader({
         onImagesChange?.(images);
     }, [images, onImagesChange]);
 
+    // Countdown ticker: decrement retryCountdown every second for rate-limited images
+    useEffect(() => {
+        const hasRateLimited = images.some((img) => img.status === "rate-limited");
+        if (!hasRateLimited) return;
+        const interval = setInterval(() => {
+            const now = Date.now();
+            setImages((prev) =>
+                prev.map((img) => {
+                    if (img.status !== "rate-limited" || img.retryAt === undefined) return img;
+                    const remaining = Math.max(0, Math.ceil((img.retryAt - now) / 1000));
+                    return { ...img, retryCountdown: remaining };
+                })
+            );
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [images]);
+
     const analyzeImage = useCallback(
         async (image: UploadedImage) => {
             const formData = new FormData();
@@ -115,6 +134,31 @@ export default function ImageUploader({
                     signal: controller.signal,
                 });
                 clearTimeout(timeoutId);
+
+                if (res.status === 429) {
+                    // Rate limited — schedule auto-retry after 60 seconds
+                    const RETRY_DELAY_MS = 60_000;
+                    const retryAt = Date.now() + RETRY_DELAY_MS;
+                    setImages((prev) =>
+                        prev.map((img) =>
+                            img.id === image.id
+                                ? { ...img, status: "rate-limited" as const, retryAt, retryCountdown: 60 }
+                                : img
+                        )
+                    );
+                    setTimeout(async () => {
+                        // Reset to analyzing before retrying
+                        setImages((prev) =>
+                            prev.map((img) =>
+                                img.id === image.id
+                                    ? { ...img, status: "analyzing" as const, retryAt: undefined, retryCountdown: undefined }
+                                    : img
+                            )
+                        );
+                        await analyzeImage(image);
+                    }, RETRY_DELAY_MS);
+                    return;
+                }
 
                 if (!res.ok) {
                     const errorText = await res.text().catch(() => "Unknown error");
@@ -341,6 +385,28 @@ export default function ImageUploader({
                                         <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem" }}>
                                             <Loader2 size={15} style={{ animation: "spin 1s linear infinite", color: "var(--color-primary)" }} />
                                             <span style={{ color: "var(--color-text-secondary)" }}>Analyzing image...</span>
+                                        </div>
+                                    )}
+
+                                    {/* Rate-limited state */}
+                                    {img.status === "rate-limited" && (
+                                        <div style={{
+                                            padding: "0.5rem 0.6rem",
+                                            borderRadius: "var(--radius-sm)",
+                                            background: "rgba(255,170,0,0.08)",
+                                            border: "1px solid rgba(255,170,0,0.25)",
+                                        }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem", marginBottom: "0.25rem" }}>
+                                                <Clock size={14} color="var(--color-suspicious)" />
+                                                <span style={{ fontWeight: 600, color: "var(--color-suspicious)" }}>Rate limit reached</span>
+                                            </div>
+                                            <p style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", margin: 0, lineHeight: 1.4 }}>
+                                                Too many images analyzed at once. Auto-retrying in{" "}
+                                                <strong style={{ color: "var(--color-suspicious)" }}>
+                                                    {img.retryCountdown ?? 60}s
+                                                </strong>
+                                                ...
+                                            </p>
                                         </div>
                                     )}
 

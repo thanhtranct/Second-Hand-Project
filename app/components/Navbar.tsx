@@ -13,13 +13,10 @@ const publicLinks = [
     { href: "/products", label: "Browse", icon: Search },
 ];
 
-const authLinks = [
-    { href: "/sell", label: "Sell", icon: PlusCircle },
-    { href: "/wishlist", label: "Wishlist", icon: Heart },
-];
+
 
 export default function Navbar() {
-    const { user, isAdmin, loading } = useAuth();
+    const { user, isAdmin, isSeller, loading } = useAuth();
     const router = useRouter();
     const [mobileOpen, setMobileOpen] = useState(false);
     const [searchFocused, setSearchFocused] = useState(false);
@@ -41,7 +38,8 @@ export default function Navbar() {
 
     const allNavLinks = [
         ...publicLinks,
-        ...(user ? authLinks : []),
+        ...(user && isSeller ? [{ href: "/sell", label: "Sell", icon: PlusCircle }] : []),
+        ...(user ? [{ href: "/wishlist", label: "Wishlist", icon: Heart }] : []),
     ];
 
     return (

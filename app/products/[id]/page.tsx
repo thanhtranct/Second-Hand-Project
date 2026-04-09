@@ -10,6 +10,7 @@ import { useAuth } from "../../components/auth/AuthProvider";
 import { addToWishlist, removeFromWishlist, isInWishlist } from "../../services/wishlistService";
 import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
+import { USD_TO_VND } from "../../config/constants";
 import Card from "../../components/ui/Card";
 import {
     ArrowLeft,
@@ -51,9 +52,10 @@ export default function ProductDetailPage() {
                 productTitle: product!.title,
                 productImage: product!.images[0] || "",
                 price: product!.price,
+                amountVND: Math.round(product!.price * USD_TO_VND),
                 buyerId: user.uid,
                 sellerId: product!.sellerId || "unknown",
-                paymentMethod: "payos"
+                paymentMethod: "bank_transfer"
             });
             router.push(`/checkout/${orderId}`);
         } catch (error) {

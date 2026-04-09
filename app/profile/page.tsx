@@ -15,7 +15,7 @@ import { getSellerApplicationByUserId } from "../services/sellerService";
 import { SellerApplication } from "../data/products";
 
 function ProfileContent() {
-    const { user, profile } = useAuth();
+    const { user, profile, isSeller } = useAuth();
     const router = useRouter();
     const [displayName, setDisplayName] = useState(user?.displayName || "");
     const [saving, setSaving] = useState(false);
@@ -178,10 +178,12 @@ function ProfileContent() {
                 </h3>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                     {[
-                        { href: "/dashboard", icon: ShoppingBag, label: "My Listings", color: "var(--color-primary)" },
+                        { href: "/dashboard", icon: ShoppingBag, label: "My Orders", color: "var(--color-primary)" },
                         { href: "/wishlist", icon: Heart, label: "Wishlist", color: "var(--color-flagged)" },
-                        { href: `/seller/${user?.uid}`, icon: Camera, label: "My Shop", color: "var(--color-accent)" },
-                        { href: "/sell", icon: Shield, label: "Sell Item", color: "var(--color-suspicious)" },
+                        ...(isSeller ? [
+                            { href: `/seller/${user?.uid}`, icon: Camera, label: "My Shop", color: "var(--color-accent)" },
+                            { href: "/sell", icon: Shield, label: "Sell Item", color: "var(--color-suspicious)" },
+                        ] : []),
                     ].map((item) => (
                         <button
                             key={item.href}

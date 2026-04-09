@@ -8,6 +8,7 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   isAdmin: boolean;
+  isSeller: boolean;
   loading: boolean;
 }
 
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   isAdmin: false,
+  isSeller: false,
   loading: true,
 });
 
@@ -26,6 +28,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAdminUser, setIsAdminUser] = useState(false);
+  const [isSellerUser, setIsSellerUser] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -43,9 +46,13 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         // Check admin status
         const admin = await checkAdmin(firebaseUser);
         setIsAdminUser(admin || p?.role === "admin");
+
+        // Check seller status
+        setIsSellerUser(p?.role === "seller" || p?.role === "admin" || admin);
       } else {
         setProfile(null);
         setIsAdminUser(false);
+        setIsSellerUser(false);
       }
 
       setLoading(false);
@@ -55,7 +62,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, profile, isAdmin: isAdminUser, loading }}>
+    <AuthContext.Provider value={{ user, profile, isAdmin: isAdminUser, isSeller: isSellerUser, loading }}>
       {children}
     </AuthContext.Provider>
   );
